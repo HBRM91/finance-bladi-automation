@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-FINANCE BLADI AUTOMATION - RESTORED ORIGINAL VERSION
-Logic: Updates existing rows for the current date, uses original data processing.
+FINANCE BLADI AUTOMATION - FIXED
+Resolves:
+1. Google Sheets 404 (Force fallback ID)
+2. 'No function' errors (Explicitly checks module function names)
 """
 
 import os
@@ -60,7 +62,7 @@ class DataCleaner:
         return cleaned
 
 # ============================================================================
-# MODULE COLLECTOR
+# MODULE COLLECTOR (FIXED)
 # ============================================================================
 
 class ModuleCollector:
@@ -104,18 +106,26 @@ class ModuleCollector:
     def _collect_module(self, display_name: str, module_name: str) -> Any:
         try:
             module = __import__(module_name)
+            
+            # FIXED: Explicitly check for known function names to avoid "No function" error
             if hasattr(module, 'get_bkam_treasury_official'): return module.get_bkam_treasury_official()
+            if hasattr(module, 'get_bkam_forex_rates'): return module.get_bkam_forex_rates()
+            if hasattr(module, 'get_phosphate_price'): return module.get_phosphate_price()
+            
+            # Standard generic names
             if hasattr(module, 'collect_data'): return module.collect_data()
             if hasattr(module, 'main'): return module.main()
             if hasattr(module, 'run'): return module.run()
             if hasattr(module, 'get_data'): return module.get_data()
             
+            # Fallback search (only if explicit checks failed)
             for attr_name in dir(module):
                 if not attr_name.startswith('_'):
                     attr = getattr(module, attr_name)
                     if callable(attr):
                         try: return attr()
                         except: continue
+            
             raise Exception(f"No executable function found in {module_name}")
         except Exception as e:
             raise Exception(f"Module error: {str(e)}")
@@ -195,12 +205,20 @@ class DataProcessor:
         return [[str(c) if c is not None and c != '' else '' for c in row]]
 
 # ============================================================================
-# GOOGLE SHEETS EXPORTER
+# GOOGLE SHEETS EXPORTER (FIXED)
 # ============================================================================
 
 class GoogleSheetsExporter:
     def __init__(self):
-        self.spreadsheet_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
+        # FIXED: Priority logic for Spreadsheet ID
+        env_id = os.environ.get('SPREADSHEET_ID')
+        hardcoded_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
+        
+        if env_id and str(env_id).strip():
+            self.spreadsheet_id = str(env_id).strip()
+        else:
+            self.spreadsheet_id = hardcoded_id
+            
         self.sheet_name = 'Finance Bladi'
         self.headers = DataProcessor.COLUMNS
     
@@ -210,7 +228,7 @@ class GoogleSheetsExporter:
             import gspread
             from google.oauth2.service_account import Credentials
             
-            # Robust credentials finding (Only change from original)
+            # Robust credentials finding
             creds_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
             if not creds_path or not os.path.exists(creds_path):
                 possible_paths = [
