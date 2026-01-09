@@ -1,0 +1,57 @@
+name: Daily Finance Bladi Automation
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [trigger_daily]
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install gspread google-auth oauth2client pandas requests yfinance
+        
+    - name: Create credentials file
+      run: |
+        echo "Creating credentials.json..."
+        echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
+        
+        # Quick validation
+        echo "Validating credentials..."
+        if python -c "import json; json.load(open('credentials.json')); print('OK')"; then
+          echo "Credentials are valid JSON"
+        else
+          echo "ERROR: Invalid JSON in credentials"
+          exit 1
+        fi
+        
+    - name: Run main script
+      env:
+        SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+      run: |
+        echo "Starting automation..."
+        python main.py
+        
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.run_number }}
+        path: |
+          data/
+          logs/
