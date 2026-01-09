@@ -2,8 +2,8 @@ name: Finance Data Automation
 
 on:
   schedule:
-    - cron: '0 7 * * 1-5'
-  workflow_dispatch:
+    - cron: '0 7 * * 1-5'  # Runs at 7 AM UTC, Mon-Fri (8 AM Morocco time)
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
   collect-and-export:
@@ -21,17 +21,18 @@ jobs:
       - name: Install packages
         run: pip install -r requirements.txt
       
-      - name: Create credentials
+      - name: Create credentials file
         run: echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
       
       - name: Run automation
-        env:
-          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python main.py
       
-      - name: Save data
-        uses: actions/upload-artifact@v4
+      - name: Save data artifact
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: results
-          path: data/
+          name: finance-data-${{ github.run_id }}
+          path: |
+            data/
+            logs/
+          retention-days: 30
