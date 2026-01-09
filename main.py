@@ -1,292 +1,345 @@
+#!/usr/bin/env python3
+"""
+FINANCE BLADI AUTOMATION - RESTORED ORIGINAL VERSION
+Logic: Updates existing rows for the current date, uses original data processing.
+"""
+
 import os
 import sys
-import json
 import logging
-import pandas as pd
+import traceback
+import json
+import math
 from datetime import datetime
-from pathlib import Path
-import gspread
-from google.oauth2.service_account import Credentials
-from modules.bkam_forex import collect_bkam_forex
-from modules.bkam_treasury import collect_bkam_treasury
-from modules.investing_masi import collect_investing_masi
-from modules.trading_economics import collect_trading_economics
-from modules.yahoo_markets import collect_yahoo_markets
+from typing import Dict, Any, List, Optional
 
-# Configure logging
+# ============================================================================
+# SETUP
+# ============================================================================
+
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+SRC_MODULES_PATH = os.path.join(PROJECT_ROOT, 'src', 'modules')
+sys.path.insert(0, SRC_MODULES_PATH)
+sys.path.insert(0, PROJECT_ROOT)
+
+print(f"📍 Project root: {PROJECT_ROOT}")
+print(f"📍 Modules path: {SRC_MODULES_PATH}")
+
+for dir_name in ['data', 'downloads', 'logs', 'temp']:
+    os.makedirs(os.path.join(PROJECT_ROOT, dir_name), exist_ok=True)
+
+log_file = os.path.join(PROJECT_ROOT, 'logs', f"finance_bladi_{datetime.now().strftime('%Y%m%d')}.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'logs/finance_bladi_{datetime.now().strftime("%Y%m%d")}.log'),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(log_file), logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-class FinanceBladiAutomation:
+# ============================================================================
+# DATA CLEANER
+# ============================================================================
+
+class DataCleaner:
+    @staticmethod
+    def fix_nan_values(data: Any) -> Any:
+        if isinstance(data, dict):
+            return {k: DataCleaner.fix_nan_values(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [DataCleaner.fix_nan_values(item) for item in data]
+        elif isinstance(data, float):
+            if math.isnan(data): return ''
+            return data
+        return data
+    
+    @staticmethod
+    def clean_data_for_export(raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        cleaned = {}
+        for key, value in raw_data.items():
+            cleaned[key] = DataCleaner.fix_nan_values(value)
+        return cleaned
+
+# ============================================================================
+# MODULE COLLECTOR
+# ============================================================================
+
+class ModuleCollector:
+    MODULES = [
+        ('bkam_forex', 'bkam_forex'),
+        ('bkam_treasury', 'bkam_treasury_official'),
+        ('investing_masi', 'investing_masi'),
+        ('trading_economics', 'trading_economics'),
+        ('yahoo_markets', 'yahoo_markets')
+    ]
+    
     def __init__(self):
-        self.project_root = Path(__file__).parent
-        self.data_dir = self.project_root / "data"
-        self.logs_dir = self.project_root / "logs"
-        self.data_dir.mkdir(exist_ok=True)
-        self.logs_dir.mkdir(exist_ok=True)
-        
-        # Your spreadsheet ID
-        self.spreadsheet_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
-        
-        # Column mapping for Google Sheets
-        self.column_mapping = {
-            'EUR/MAD': 'B',
-            'USD/MAD': 'C',
-            'BT2Y': 'D',
-            'BT5Y': 'E',
-            'BT10Y': 'F',
-            'MASI': 'G',
-            'PHOSPHATE_DAP': 'H',
-            'BRENT': 'I',
-            'WTI': 'J',
-            'GAS': 'K',
-            'GOLD': 'L',
-            'SILVER': 'M',
-            'COPPER': 'N',
-            'SP500': 'O',
-            'DJIA': 'P',
-            'NASDAQ': 'Q',
-            'RUSSELL2000': 'R',
-            'CAC40': 'S',
-            'DAX': 'T',
-            'FTSE100': 'U',
-            'US10Y': 'V',
-            'VIX': 'W',
-            'BITCOIN': 'X',
-            'EURUSD': 'Y',
-            'USDJPY': 'Z',
-            'GBPUSD': 'AA',
-            'USDCAD': 'AB',
-            'AUDUSD': 'AC'
-        }
-        
-        self.all_data = {}
-        
-    def collect_data(self):
-        """Collect data from all modules"""
-        logger.info("=" * 60)
+        self.results = {}
+        self.errors = []
+    
+    def collect_all(self) -> Dict[str, Any]:
+        logger.info("="*60)
         logger.info("STARTING DATA COLLECTION")
-        logger.info("=" * 60)
+        logger.info("="*60)
         
-        modules = [
-            ("bkam_forex", collect_bkam_forex),
-            ("bkam_treasury", collect_bkam_treasury),
-            ("investing_masi", collect_investing_masi),
-            ("trading_economics", collect_trading_economics),
-            ("yahoo_markets", collect_yahoo_markets)
-        ]
-        
-        successful = 0
-        for name, module_func in modules:
-            logger.info(f"Collecting {name}...")
+        for display_name, module_name in self.MODULES:
             try:
-                data = module_func()
-                if data:
-                    self.all_data.update(data)
-                    logger.info(f"✅ {name}: Success")
-                    successful += 1
+                logger.info(f"Collecting {display_name}...")
+                result = self._collect_module(display_name, module_name)
+                
+                if result is not None:
+                    result = DataCleaner.fix_nan_values(result)
+                    self.results[display_name] = result
+                    logger.info(f"✅ {display_name}: Success")
                 else:
-                    logger.warning(f"⚠️ {name}: No data returned")
+                    logger.warning(f"⚠️ {display_name}: No data returned")
+                    self.errors.append(f"{display_name}: No data")
             except Exception as e:
-                logger.error(f"❌ {name}: {str(e)}")
+                error_msg = f"{display_name}: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                self.errors.append(error_msg)
         
-        logger.info(f"Collection complete: {successful}/{len(modules)} modules succeeded")
-        return successful > 0
+        logger.info(f"Collection complete: {len(self.results)}/{len(self.MODULES)} modules succeeded")
+        return self.results
     
-    def process_data(self):
-        """Process and unify all collected data"""
-        logger.info("Processing data into unified format...")
-        
-        # Ensure all required keys exist
-        processed_data = {
-            'timestamp': datetime.now().isoformat(),
-            'date': datetime.now().strftime('%Y-%m-%d')
-        }
-        
-        # Add all collected data
-        for key, value in self.all_data.items():
-            if isinstance(value, (int, float, str)):
-                processed_data[key] = value
-            elif value is not None:
-                processed_data[key] = str(value)
-        
-        # Log key metrics
-        logger.info("\n📊 KEY DATA COLLECTED:")
-        for key in ['EUR/MAD', 'USD/MAD', 'BT2Y', 'MASI', 'BITCOIN']:
-            if key in processed_data:
-                logger.info(f"  • {key}: {processed_data[key]}")
-        
-        logger.info("=" * 60)
-        return processed_data
-    
-    def connect_to_google_sheets(self):
-        """Connect to Google Sheets API"""
-        logger.info("\n📤 Connecting to Google Sheets...")
-        
-        # Find credentials
-        credentials_path = self.project_root / "credentials.json"
-        if not credentials_path.exists():
-            logger.error(f"❌ Credentials file not found at: {credentials_path}")
-            return None
-        
+    def _collect_module(self, display_name: str, module_name: str) -> Any:
         try:
-            # Authenticate
-            scopes = ['https://www.googleapis.com/auth/spreadsheets']
-            credentials = Credentials.from_service_account_file(
-                str(credentials_path),
-                scopes=scopes
-            )
+            module = __import__(module_name)
+            if hasattr(module, 'get_bkam_treasury_official'): return module.get_bkam_treasury_official()
+            if hasattr(module, 'collect_data'): return module.collect_data()
+            if hasattr(module, 'main'): return module.main()
+            if hasattr(module, 'run'): return module.run()
+            if hasattr(module, 'get_data'): return module.get_data()
+            
+            for attr_name in dir(module):
+                if not attr_name.startswith('_'):
+                    attr = getattr(module, attr_name)
+                    if callable(attr):
+                        try: return attr()
+                        except: continue
+            raise Exception(f"No executable function found in {module_name}")
+        except Exception as e:
+            raise Exception(f"Module error: {str(e)}")
+
+# ============================================================================
+# DATA PROCESSOR
+# ============================================================================
+
+class DataProcessor:
+    COLUMNS = [
+        'Date',
+        'EUR/MAD', 'USD/MAD',
+        'BT2Y (%)', 'BT5Y (%)', 'BT10Y (%)',
+        'MASI',
+        'Phosphate DAP (USD/T)',
+        'BRENT (USD)', 'WTI (USD)', 'GOLD (USD)', 'SILVER (USD)', 'BITCOIN (USD)',
+        'EUR/USD', 'USD/JPY', 'GBP/USD',
+        'S&P 500', 'Dow Jones', 'NASDAQ',
+        'US 10Y Yield (%)', 'VIX'
+    ]
+    
+    @staticmethod
+    def _extract_nested_value(data: Any, *paths: List[str]) -> Any:
+        if not isinstance(data, dict): return ''
+        for path in paths:
+            try:
+                keys = path.split('.')
+                current = data
+                for key in keys:
+                    if isinstance(current, dict) and key in current: current = current[key]
+                    else:
+                        current = None
+                        break
+                if current is not None and current != '':
+                    if isinstance(current, float) and math.isnan(current): return ''
+                    return current
+            except: continue
+        return ''
+    
+    @staticmethod
+    def _clean_masi_value(value: Any) -> Any:
+        if isinstance(value, str): return value.replace(',', '')
+        return value
+    
+    def process(self, raw_data: Dict[str, Any]) -> List[List[Any]]:
+        today = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        row = [today]
+        raw_data = DataCleaner.fix_nan_values(raw_data)
+        
+        # 1. Forex
+        row.append(self._extract_nested_value(raw_data.get('bkam_forex', {}), 'EUR/MAD', 'eur_mad', 'EUR_MAD'))
+        row.append(self._extract_nested_value(raw_data.get('bkam_forex', {}), 'USD/MAD', 'usd_mad', 'USD_MAD'))
+        
+        # 2. Treasury
+        treasury = raw_data.get('bkam_treasury', {})
+        row.append(self._extract_nested_value(treasury, 'BT2Y', 'bt2y'))
+        row.append(self._extract_nested_value(treasury, 'BT5Y', 'bt5y'))
+        row.append(self._extract_nested_value(treasury, 'BT10Y', 'bt10y'))
+        
+        # 3. MASI
+        masi = self._extract_nested_value(raw_data.get('investing_masi', {}), 'MASI', 'masi', 'value')
+        row.append(self._clean_masi_value(masi))
+        
+        # 4. Phosphate
+        row.append(self._extract_nested_value(raw_data.get('trading_economics', {}), 'Phosphate DAP', 'PHOSPHATE_DAP'))
+        
+        # 5. Yahoo
+        yahoo = raw_data.get('yahoo_markets', {})
+        yahoo_keys = [
+            ['BRENT', 'brent'], ['WTI', 'wti'], ['GOLD', 'gold'], ['SILVER', 'silver'], ['BITCOIN', 'bitcoin'],
+            ['EURUSD', 'eurusd'], ['USDJPY', 'usdjpy'], ['GBPUSD', 'gbpusd'],
+            ['SP500', '^GSPC'], ['DJIA', '^DJI'], ['NASDAQ', '^IXIC'], ['US10Y', '^TNX'], ['VIX', '^VIX']
+        ]
+        for keys in yahoo_keys:
+            row.append(self._extract_nested_value(yahoo, *keys))
+            
+        return [[str(c) if c is not None and c != '' else '' for c in row]]
+
+# ============================================================================
+# GOOGLE SHEETS EXPORTER
+# ============================================================================
+
+class GoogleSheetsExporter:
+    def __init__(self):
+        self.spreadsheet_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
+        self.sheet_name = 'Finance Bladi'
+        self.headers = DataProcessor.COLUMNS
+    
+    def export(self, data_row: List[List[Any]]) -> bool:
+        try:
+            print("\n📤 Connecting to Google Sheets...")
+            import gspread
+            from google.oauth2.service_account import Credentials
+            
+            # Robust credentials finding (Only change from original)
+            creds_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
+            if not creds_path or not os.path.exists(creds_path):
+                possible_paths = [
+                    'credentials.json',
+                    os.path.join(PROJECT_ROOT, 'credentials.json'),
+                    os.path.join(os.getcwd(), 'credentials.json'),
+                    '/home/runner/work/finance-bladi-automation/finance-bladi-automation/credentials.json'
+                ]
+                for p in possible_paths:
+                    if os.path.exists(p):
+                        creds_path = p
+                        break
+            
+            if not creds_path or not os.path.exists(creds_path):
+                print(f"❌ Credentials not found")
+                return False
+                
+            print(f"✅ Using credentials: {creds_path}")
+            
+            scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+            credentials = Credentials.from_service_account_file(creds_path, scopes=scopes)
             client = gspread.authorize(credentials)
             
-            logger.info(f"✅ Credentials loaded from: {credentials_path}")
-            logger.info(f"📊 Opening spreadsheet ID: {self.spreadsheet_id}")
-            
-            # Open spreadsheet
+            print(f"📄 Opening spreadsheet: {self.spreadsheet_id}")
             spreadsheet = client.open_by_key(self.spreadsheet_id)
-            logger.info(f"✅ Spreadsheet found: {spreadsheet.title}")
             
-            return spreadsheet
-        except gspread.exceptions.SpreadsheetNotFound:
-            logger.error(f"❌ Spreadsheet not found. Check if ID '{self.spreadsheet_id}' is correct")
-            logger.error("📋 Make sure the spreadsheet is shared with the service account:")
-            logger.error("   928771074788-compute@developer.gserviceaccount.com")
-            return None
-        except Exception as e:
-            logger.error(f"❌ Google Sheets connection failed: {str(e)}")
-            return None
-    
-    def update_google_sheets(self, data):
-        """Update Google Sheets with collected data"""
-        spreadsheet = self.connect_to_google_sheets()
-        if not spreadsheet:
-            return False
-        
-        try:
-            # Get or create worksheet
             try:
-                worksheet = spreadsheet.worksheet("Finance Data")
-            except gspread.exceptions.WorksheetNotFound:
-                worksheet = spreadsheet.add_worksheet("Finance Data", rows=1000, cols=50)
-                logger.info("📄 Created new worksheet: Finance Data")
+                worksheet = spreadsheet.worksheet(self.sheet_name)
+                print(f"📋 Using existing sheet: '{self.sheet_name}'")
+            except:
+                print(f"📝 Creating new sheet: '{self.sheet_name}'")
+                worksheet = spreadsheet.add_worksheet(title=self.sheet_name, rows=1000, cols=len(self.headers))
             
-            # Find next empty row
-            all_values = worksheet.get_all_values()
-            next_row = len(all_values) + 1
+            self._ensure_headers(worksheet)
             
-            # Prepare row data
-            row_data = []
-            for key, col_letter in self.column_mapping.items():
-                value = data.get(key, '')
-                row_data.append(value)
+            # ORIGINAL LOGIC: Check if today already exists
+            all_data = worksheet.get_all_values()
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            today_exists = False
+            existing_row = None
             
-            # Add timestamp
-            row_data.insert(0, data['timestamp'])
+            for i, row in enumerate(all_data[1:], start=2):
+                if row and len(row) > 0:
+                    try:
+                        row_date = row[0].split()[0]
+                        if row_date == today_date:
+                            today_exists = True
+                            existing_row = i
+                            break
+                    except: continue
             
-            # Update the row
-            worksheet.update(f'A{next_row}', [row_data])
+            clean_row = data_row[0]
             
-            logger.info(f"✅ Data written to row {next_row}")
-            
-            # Update headers if first row
-            if next_row == 2:  # First data row
-                headers = ['Timestamp'] + list(self.column_mapping.keys())
-                worksheet.update('A1', [headers])
-                logger.info("📋 Headers updated")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to update Google Sheets: {str(e)}")
-            return False
-    
-    def save_local_backup(self, data):
-        """Save data locally as backup"""
-        try:
-            # Save as JSON
-            json_path = self.data_dir / f"raw_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            logger.info(f"💾 Raw data saved: {json_path}")
-            
-            # Save as CSV
-            df = pd.DataFrame([data])
-            csv_path = self.data_dir / f"data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            df.to_csv(csv_path, index=False, encoding='utf-8')
-            logger.info(f"💾 CSV data saved: {csv_path}")
-            
-            return True
-        except Exception as e:
-            logger.error(f"❌ Failed to save local backup: {str(e)}")
-            return False
-    
-    def run(self):
-        """Main execution function"""
-        logger.info("=" * 60)
-        logger.info("🚀 FINANCE BLADI AUTOMATION")
-        logger.info("=" * 60)
-        logger.info(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"📍 Project root: {self.project_root}")
-        
-        try:
-            # Step 1: Collect data
-            if not self.collect_data():
-                logger.error("❌ Data collection failed")
-                return False
-            
-            # Step 2: Process data
-            processed_data = self.process_data()
-            
-            # Step 3: Save local backup
-            self.save_local_backup(processed_data)
-            
-            # Step 4: Update Google Sheets
-            sheets_success = self.update_google_sheets(processed_data)
-            
-            # Step 5: Summary
-            logger.info("=" * 60)
-            logger.info("🎯 EXECUTION SUMMARY")
-            logger.info("=" * 60)
-            logger.info("✅ Data collection completed")
-            logger.info("✅ Data processed and saved locally")
-            
-            if sheets_success:
-                logger.info("✅ Data exported to Google Sheets")
-                logger.info("✨ FINANCE BLADI AUTOMATION COMPLETED SUCCESSFULLY")
+            if today_exists and existing_row:
+                print(f"📝 Updating existing row {existing_row} for {today_date}...")
+                for col_idx, value in enumerate(clean_row, start=1):
+                    worksheet.update_cell(existing_row, col_idx, value)
+                print(f"✅ Updated row {existing_row}")
             else:
-                logger.warning("⚠️ Google Sheets export failed, but data is saved locally")
-                logger.info("📁 Local data available in: data/")
-                logger.info("🔧 Fix Google Sheets configuration for automatic export")
-            
-            logger.info(f"📍 Data directory: {self.data_dir}")
-            logger.info(f"📍 Logs directory: {self.logs_dir}")
-            logger.info("=" * 60)
-            
-            return sheets_success
+                print(f"📝 Adding new row for {today_date}...")
+                worksheet.append_row(clean_row)
+                print(f"✅ Appended new row")
+                
+            return True
             
         except Exception as e:
-            logger.error(f"❌ Fatal error: {str(e)}", exc_info=True)
+            print(f"❌ Google Sheets export failed: {e}")
             return False
+    
+    def _ensure_headers(self, worksheet) -> bool:
+        try:
+            first_row = worksheet.row_values(1)
+            if not first_row or first_row[0] != 'Date':
+                worksheet.clear()
+                worksheet.append_row(self.headers)
+                return True
+            return True
+        except: return False
+
+# ============================================================================
+# LOCAL STORAGE
+# ============================================================================
+
+class LocalStorage:
+    def __init__(self):
+        self.data_dir = os.path.join(PROJECT_ROOT, 'data')
+        os.makedirs(self.data_dir, exist_ok=True)
+    
+    def save(self, raw_data: Dict, processed_row: List[List[Any]]):
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        with open(os.path.join(self.data_dir, f'raw_{timestamp}.json'), 'w') as f:
+            json.dump(raw_data, f, indent=2, default=str)
+        
+        with open(os.path.join(self.data_dir, f'data_{timestamp}.csv'), 'w') as f:
+            f.write(','.join(DataProcessor.COLUMNS) + '\n')
+            f.write(','.join([str(c) for c in processed_row[0]]) + '\n')
+
+# ============================================================================
+# MAIN
+# ============================================================================
 
 def main():
-    """Main entry point"""
-    automation = FinanceBladiAutomation()
+    print("\n" + "="*60)
+    print("🚀 FINANCE BLADI AUTOMATION")
+    print("="*60)
     
-    try:
-        success = automation.run()
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        logger.info("⚠️ Process interrupted by user")
-        sys.exit(130)
-    except Exception as e:
-        logger.error(f"❌ Unexpected error: {str(e)}", exc_info=True)
-        sys.exit(1)
+    collector = ModuleCollector()
+    processor = DataProcessor()
+    sheets_exporter = GoogleSheetsExporter()
+    local_storage = LocalStorage()
+    
+    print("📦 Collecting data from modules...")
+    raw_data = collector.collect_all()
+    
+    if not raw_data:
+        print("❌ No data collected.")
+        return False
+        
+    print("\n🔄 Processing data...")
+    processed_data = processor.process(raw_data)
+    
+    print("\n" + "="*60)
+    export_success = sheets_exporter.export(processed_data)
+    
+    print("\n💾 Saving local backup...")
+    local_storage.save(raw_data, processed_data)
+    
+    return export_success
 
 if __name__ == "__main__":
-    main()
+    success = main()
+    sys.exit(0 if success else 1)
