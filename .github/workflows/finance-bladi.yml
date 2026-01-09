@@ -1,44 +1,38 @@
-name: Finance Bladi Automation
+# .github/workflows/daily-collection.yml
+name: Daily Data Collection
 
 on:
   schedule:
-    - cron: '0 7 * * *'  # Daily at 7:00 AM UTC (8:00 AM Morocco)
-  workflow_dispatch:     # Allow manual runs
+    # 7:00 UTC = 8:00 Maroc (du lundi au vendredi)
+    - cron: '0 7 * * 1-5'
+  # Optionnel: déclenchement manuel
+  workflow_dispatch:
 
 jobs:
-  run-automation:
+  collect-data:
     runs-on: ubuntu-latest
     
     steps:
-    - name: 📥 Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: 🐍 Setup Python
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
-    - name: 📦 Install dependencies
+    - name: Install dependencies
       run: |
-        pip install gspread google-auth pandas yfinance requests beautifulsoup4
+        pip install -r requirements.txt
+        pip install yfinance pandas requests
         
-    - name: 🔑 Setup Google credentials
-      env:
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+    - name: Run data collection
       run: |
-        echo "$GOOGLE_CREDENTIALS" > credentials.json
-        echo "✅ Credentials saved"
+        cd /home/runner/work/finance-bladi-automation/finance-bladi-automation
+        python src/main.py
         
-    - name: 🚀 Run automation
-      run: |
-        echo "Starting Finance Bladi Automation..."
-        python main.py
-        
-    - name: 💾 Save results
-      if: always()
-      uses: actions/upload-artifact@v4
+    - name: Upload results
+      uses: actions/upload-artifact@v3
       with:
-        name: automation-results
-        path: |
-          logs/
-          data/
+        name: market-data-${{ github.run_id }}
+        path: /home/runner/work/finance-bladi-automation/finance-bladi-automation/downloads/
