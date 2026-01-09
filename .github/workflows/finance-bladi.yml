@@ -1,0 +1,104 @@
+name: Finance Bladi Daily Automation
+
+on:
+  # Runs daily at 9:00 AM UTC (10:00 AM Morocco time)
+  schedule:
+    - cron: '0 9 * * *'
+  
+  # Also allows manual trigger from GitHub UI
+  workflow_dispatch:
+  
+  # Optional: Run when code is pushed (for testing)
+  push:
+    branches: [ main ]
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v3
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: 📦 Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install gspread google-auth pandas yfinance requests beautifulsoup4
+        
+    - name: 🔑 Set up Google credentials
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: |
+        echo "$GOOGLE_CREDENTIALS" > credentials.json
+        echo "✅ Google credentials set up"
+        
+    - name: 🚀 Run Finance Bladi Automation
+      run: |
+        echo "Starting Finance Bladi Automation..."
+        echo "Current directory: $(pwd)"
+        echo "Python version: $(python --version)"
+        echo "Files in directory:"
+        ls -la
+        
+        # Run the automation
+        python main.py
+        
+        echo "✅ Automation completed!"
+        
+    - name: 📊 Upload logs and data
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: automation-output-${{ github.run_id }}
+        path: |
+          logs/
+          data/
+        retention-days: 7
+        
+    - name: 📧 Send success notification
+      if: success()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{ secrets.EMAIL_USER }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "✅ Finance Bladi Automation Successful"
+        to: ${{ secrets.EMAIL_TO }}
+        from: "Finance Bladi Bot"
+        body: |
+          Finance Bladi automation ran successfully!
+          
+          Run ID: ${{ github.run_id }}
+          Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          
+          Data collected and exported to Google Sheets.
+          
+          Check your spreadsheet: https://docs.google.com/spreadsheets/d/1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90
+          
+    - name: 📧 Send failure notification
+      if: failure()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{ secrets.EMAIL_USER }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "❌ Finance Bladi Automation Failed"
+        to: ${{ secrets.EMAIL_TO }}
+        from: "Finance Bladi Bot"
+        body: |
+          Finance Bladi automation FAILED!
+          
+          Run ID: ${{ github.run_id }}
+          Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          
+          Please check the GitHub Actions logs for details.

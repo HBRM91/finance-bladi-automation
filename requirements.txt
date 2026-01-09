@@ -1,0 +1,7 @@
+gspread==5.11.4
+google-auth==2.23.4
+pandas==2.1.4
+yfinance==0.2.36
+requests==2.31.0
+beautifulsoup4==4.12.2
+schedule==1.2.0
