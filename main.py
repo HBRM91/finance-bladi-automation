@@ -164,30 +164,46 @@ class DataProcessor:
                     return current
             except: continue
         return ''
-    
+
+    # ✅ NEW: Helper to auto-correct formatting errors
     @staticmethod
-    def _clean_masi_value(value: Any) -> Any:
-        if isinstance(value, str): return value.replace(',', '')
-        return value
-    
+    def _sanitize_float(value, min_val=0, max_val=1000000, divider_correction=10000):
+        try:
+            if value is None or value == '': return ''
+            f_val = float(value)
+            
+            # Fix scaling error (e.g. 107602 -> 10.7602)
+            if f_val > 100 and divider_correction:
+                 # Specific check for Forex (usually < 20)
+                 if max_val < 50 and f_val > 1000:
+                     f_val = f_val / divider_correction
+            
+            return f_val
+        except:
+            return value
+
     def process(self, raw_data: Dict[str, Any]) -> List[List[Any]]:
         today = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         row = [today]
         raw_data = DataCleaner.fix_nan_values(raw_data)
         
-        # 1. Forex
-        row.append(self._extract_nested_value(raw_data.get('bkam_forex', {}), 'EUR/MAD', 'eur_mad', 'EUR_MAD'))
-        row.append(self._extract_nested_value(raw_data.get('bkam_forex', {}), 'USD/MAD', 'usd_mad', 'USD_MAD'))
+        # 1. Forex (Add Sanity Check: max value 20)
+        eur = self._extract_nested_value(raw_data.get('bkam_forex', {}), 'EUR/MAD', 'eur_mad')
+        usd = self._extract_nested_value(raw_data.get('bkam_forex', {}), 'USD/MAD', 'usd_mad')
+        
+        row.append(self._sanitize_float(eur, max_val=20))
+        row.append(self._sanitize_float(usd, max_val=20))
         
         # 2. Treasury
         treasury = raw_data.get('bkam_treasury', {})
-        row.append(self._extract_nested_value(treasury, 'BT2Y', 'bt2y'))
-        row.append(self._extract_nested_value(treasury, 'BT5Y', 'bt5y'))
-        row.append(self._extract_nested_value(treasury, 'BT10Y', 'bt10y'))
+        row.append(treasury.get('bt2y', ''))
+        row.append(treasury.get('bt5y', ''))
+        row.append(treasury.get('bt10y', ''))
         
         # 3. MASI
         masi = self._extract_nested_value(raw_data.get('investing_masi', {}), 'MASI', 'masi', 'value')
-        row.append(self._clean_masi_value(masi))
+        if isinstance(masi, str): masi = masi.replace(',', '')
+        row.append(masi)
         
         # 4. Phosphate
         row.append(self._extract_nested_value(raw_data.get('trading_economics', {}), 'Phosphate DAP', 'PHOSPHATE_DAP'))
@@ -200,7 +216,8 @@ class DataProcessor:
             ['SP500', '^GSPC'], ['DJIA', '^DJI'], ['NASDAQ', '^IXIC'], ['US10Y', '^TNX'], ['VIX', '^VIX']
         ]
         for keys in yahoo_keys:
-            row.append(self._extract_nested_value(yahoo, *keys))
+            val = self._extract_nested_value(yahoo, *keys)
+            row.append(val)
             
         return [[str(c) if c is not None and c != '' else '' for c in row]]
 

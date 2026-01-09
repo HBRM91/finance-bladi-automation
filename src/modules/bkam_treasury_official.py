@@ -1,253 +1,144 @@
-# src/modules/bkam_treasury_official.py
-# VERSION OFFICIELLE - Alignée sur la méthodologie BKAM/DTFE
-
-# HEADERS TO BYPASS 403 BLOCK
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'DNT': '1',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Cache-Control': 'max-age=0'
-}
-
-import pandas as pd
 import requests
-from datetime import datetime as dt, timedelta
-import os
-import re
-import json
-from typing import Dict, List, Tuple, Optional
+import pandas as pd
+from datetime import datetime
+from io import StringIO
+import logging
 
-class BkamTreasuryCurve:
-    """
-    Classe pour construire et interpréter la courbe des taux du Trésor marocain
-    selon la méthodologie officielle BKAM/DTFE.
-    """
-    
-    def __init__(self, csv_content: str = None, csv_url: str = None):
-        self.treasury_data = []
-        self.reference_date = dt.now().date()
-        
-        if csv_content:
-            self.load_from_csv(csv_content)
-        elif csv_url:
-            self.download_and_load(csv_url)
-    
-    def download_and_load(self, page_url: str) -> bool:
-        try:
-            print(f"[{dt.now()}] Téléchargement depuis BKAM...")
-            
-            # Use global headers
-            global headers
-            response = requests.get(page_url, headers=headers, timeout=30)
-            
-            if response.status_code != 200:
-                raise Exception(f"HTTP {response.status_code}")
-            
-            # Trouver le lien CSV
-            html_content = response.text
-            pattern = r'href="(/export/blockcsv/[^"]+)"'
-            matches = re.findall(pattern, html_content, re.IGNORECASE)
-            
-            if not matches:
-                raise Exception("Lien CSV non trouvé")
-            
-            csv_url = "https://www.bkam.ma" + matches[0]
-            print(f"  → Lien CSV: {csv_url[:80]}...")
-            
-            # Télécharger le CSV
-            csv_response = requests.get(csv_url, headers=headers, timeout=30)
-            
-            if csv_response.status_code != 200:
-                raise Exception(f"CSV HTTP {csv_response.status_code}")
-            
-            csv_content = csv_response.content.decode('utf-8-sig')
-            return self.load_from_csv(csv_content)
-            
-        except Exception as e:
-            print(f"  ❌ Erreur: {e}")
-            return False
-    
-    def load_from_csv(self, csv_content: str) -> bool:
-        try:
-            lines = csv_content.strip().split('\n')
-            self.treasury_data = []
-            
-            for line in lines[2:]:
-                line = line.strip()
-                if not line or line.startswith('Total'):
-                    continue
-                
-                parts = [p.strip().strip('"') for p in line.split(';')]
-                
-                if len(parts) >= 4:
-                    try:
-                        maturity_date_str = parts[0]
-                        rate_str = parts[2]
-                        
-                        rate_clean = rate_str.replace('%', '').replace(',', '.').strip()
-                        rate_value = float(rate_clean)
-                        maturity_date = dt.strptime(maturity_date_str, '%d/%m/%Y').date()
-                        days_to_maturity = (maturity_date - self.reference_date).days
-                        
-                        if days_to_maturity < 0: continue
-                        
-                        self.treasury_data.append({
-                            'maturity_date': maturity_date,
-                            'maturity_date_str': maturity_date_str,
-                            'days': days_to_maturity,
-                            'years': days_to_maturity / 365.25,
-                            'rate': rate_value
-                        })
-                    except: continue
-            
-            self.treasury_data.sort(key=lambda x: x['days'])
-            
-            if not self.treasury_data:
-                raise Exception("Aucune donnée valide dans le CSV")
-            
-            print(f"  ✅ {len(self.treasury_data)} points de référence chargés")
-            return True
-        except Exception as e:
-            print(f"  ❌ Erreur de parsing: {e}")
-            return False
-    
-    def linear_interpolation(self, target_days: int) -> Tuple[Optional[float], Dict]:
-        if len(self.treasury_data) < 2:
-            return None, {'error': 'Données insuffisantes'}
-        
-        # Cas 1: Avant la première échéance
-        if target_days <= self.treasury_data[0]['days']:
-            point = self.treasury_data[0]
-            return point['rate'], {
-                'method': 'Première échéance',
-                'point_used': point['maturity_date_str'],
-                'actual_days': point['days'],
-                'actual_years': point['years']
-            }
-        
-        # Cas 2: Après la dernière échéance
-        if target_days >= self.treasury_data[-1]['days']:
-            point = self.treasury_data[-1]
-            return point['rate'], {
-                'method': 'Dernière échéance',
-                'point_used': point['maturity_date_str'],
-                'actual_days': point['days'],
-                'actual_years': point['years']
-            }
-        
-        # Cas 3: Interpolation
-        for i in range(len(self.treasury_data) - 1):
-            d1, r1 = self.treasury_data[i]['days'], self.treasury_data[i]['rate']
-            d2, r2 = self.treasury_data[i+1]['days'], self.treasury_data[i+1]['rate']
-            
-            if d1 <= target_days <= d2:
-                interpolated_rate = r1 + (target_days - d1) * (r2 - r1) / (d2 - d1)
-                
-                metadata = {
-                    'method': 'Interpolation linéaire',
-                    'point_before': self.treasury_data[i]['maturity_date_str'],
-                    'point_after': self.treasury_data[i+1]['maturity_date_str'],
-                    'rate_before': r1,
-                    'rate_after': r2,
-                    'days_before': d1,
-                    'days_after': d2,
-                    'actual_days': target_days,
-                    'actual_years': target_days / 365.25
-                }
-                return round(interpolated_rate, 4), metadata
-        
-        return None, {'error': 'Point non trouvé'}
-    
-    def get_rate_for_maturity(self, target_years: float) -> Dict:
-        target_days = int(target_years * 365.25)
-        rate, metadata = self.linear_interpolation(target_days)
-        return {
-            'target_years': target_years,
-            'target_days': target_days,
-            'rate': rate,
-            **metadata
-        }
-    
-    def get_standard_maturities(self) -> Dict:
-        results = {}
-        for key, years in {'BT2Y': 2.0, 'BT5Y': 5.0, 'BT10Y': 10.0}.items():
-            results[key] = self.get_rate_for_maturity(years)
-        return results
-        
-    def display_curve_info(self):
-        """Affiche les détails de la courbe dans les logs"""
-        print("\n" + "="*60)
-        print("COURBE DES TAUX BKAM - INFORMATIONS DÉTAILLÉES")
-        print("="*60)
-        print(f"Date de référence: {self.reference_date}")
-        print(f"Points de référence: {len(self.treasury_data)}")
-        print("\nPoints de la courbe:")
-        print("-" * 70)
-        print(f"{'Date':12} {'Jours':>6} {'Années':>8} {'Taux':>8}")
-        print("-" * 70)
-        for point in self.treasury_data:
-            print(f"{point['maturity_date_str']:12} {point['days']:6} "
-                  f"{point['years']:8.2f} {point['rate']:8.3f}%")
-        print("-" * 70)
+logger = logging.getLogger(__name__)
 
-    def export_for_finance_bladi(self) -> Dict:
-        standard_rates = self.get_standard_maturities()
-        output = {'methodology': 'Interpolation linéaire BKAM/DTFE'}
-        for key in ['BT2Y', 'BT5Y', 'BT10Y']:
-            if key in standard_rates and standard_rates[key]['rate'] is not None:
-                output[key] = standard_rates[key]['rate']
-        return output
+def interpolate_linear(target_years, sorted_data):
+    """
+    Performs linear interpolation for a specific target duration.
+    target_years: 2, 5, or 10
+    sorted_data: list of dicts [{'days': int, 'rate': float, 'date': str}]
+    """
+    target_days = int(target_years * 365) # Standard convention (or 365.25)
+    
+    # 1. Handle edge cases (Target lower than min or higher than max)
+    if not sorted_data:
+        return None
+    
+    if target_days <= sorted_data[0]['days']:
+        return sorted_data[0]['rate'] # Too short, take minimum
+    if target_days >= sorted_data[-1]['days']:
+        return sorted_data[-1]['rate'] # Too long, take maximum
+
+    # 2. Find the two points surrounding the target (P1 and P2)
+    p1 = None
+    p2 = None
+
+    for i in range(len(sorted_data) - 1):
+        if sorted_data[i]['days'] <= target_days <= sorted_data[i+1]['days']:
+            p1 = sorted_data[i]
+            p2 = sorted_data[i+1]
+            break
+    
+    if not p1 or not p2:
+        return None
+
+    # 3. Mathematical Interpolation Formula
+    # y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+    
+    days_diff = p2['days'] - p1['days']
+    rate_diff = p2['rate'] - p1['rate']
+    
+    if days_diff == 0: return p1['rate']
+
+    fraction = (target_days - p1['days']) / days_diff
+    interpolated_rate = p1['rate'] + (fraction * rate_diff)
+
+    # 4. Log the math (As requested)
+    log_msg = (
+        f"\nBT{target_years}Y ({target_years} ans):\n"
+        f"  → Taux: {interpolated_rate:.3f}%\n"
+        f"  → Méthode: Interpolation linéaire\n"
+        f"  → Interpolation entre:\n"
+        f"     • {p1['date']}: {p1['rate']}% ({p1['days']} jours)\n"
+        f"     • {p2['date']}: {p2['rate']}% ({p2['days']} jours)\n"
+        f"  → Maturité réelle: {target_years} ans ({target_days} jours)"
+    )
+    print(log_msg) # Print to console for immediate visibility
+    logger.info(f"Interpolation {target_years}Y: {interpolated_rate:.3f}% (between {p1['days']}d and {p2['days']}d)")
+
+    return round(interpolated_rate, 3)
 
 def get_bkam_treasury_official():
-    print("\n" + "="*80)
-    print("FINANCE BLADI - COLLECTE DES TAUX DU TRÉSOR (MÉTHODOLOGIE BKAM/DTFE)")
-    print("="*80)
+    url = "https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-obligataire/Marche-des-bons-de-tresor/Marche-secondaire/Taux-de-reference-des-bons-du-tresor"
     
-    PAGE_URL = "https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-obligataire/Marche-des-bons-de-tresor/Marche-secondaire/Taux-de-reference-des-bons-du-tresor"
-    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+    }
+
+    results = {'bt2y': '', 'bt5y': '', 'bt10y': ''}
+
     try:
-        curve = BkamTreasuryCurve()
-        if not curve.download_and_load(PAGE_URL):
-            raise Exception("Échec du chargement des données")
-            
-        # 1. DISPLAY DETAILED INFO (The part you requested)
-        curve.display_curve_info()
+        logger.info(f"Connecting to BKAM Treasury: {url}")
+        response = requests.get(url, headers=headers, timeout=20)
+        response.raise_for_status()
         
-        # 2. PRINT CALCULATION STEPS
-        print("\n" + "="*60)
-        print("CALCUL DES TAUX STANDARD 2Y, 5Y, 10Y")
+        # Parse HTML
+        dfs = pd.read_html(StringIO(response.text))
+        if not dfs: return results
+        df = dfs[0]
+        
+        # Clean columns
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        date_col = next((c for c in df.columns if 'chah' in c or 'echeance' in c or 'échéance' in c), None)
+        rate_col = next((c for c in df.columns if 'taux' in c or 'moyen' in c), None)
+        
+        if not date_col or not rate_col: return results
+
+        today = datetime.now()
+        data_points = []
+
+        # 1. EXTRACT ALL RAW DATA
+        for index, row in df.iterrows():
+            try:
+                # Get Date
+                date_val = str(row[date_col])
+                maturity = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
+                if pd.isna(maturity): continue
+                
+                # Get Rate
+                raw_rate = str(row[rate_col]).replace(',', '.').replace('%', '').strip()
+                rate = float(raw_rate)
+                
+                # Calculate Days
+                days = (maturity - today).days
+                if days <= 0: continue
+
+                data_points.append({
+                    'days': days,
+                    'rate': rate,
+                    'date': maturity.strftime('%d/%m/%Y')
+                })
+            except: continue
+        
+        # 2. SORT BY DAYS (Required for interpolation)
+        data_points.sort(key=lambda x: x['days'])
+        
+        if not data_points:
+            logger.warning("No valid data points extracted for interpolation")
+            return results
+
+        print("="*60)
+        print("CALCUL DES TAUX STANDARD 2Y, 5Y, 10Y (INTERPOLATION)")
+        print("="*60)
+
+        # 3. COMPUTE INTERPOLATED RATES
+        results['bt2y'] = interpolate_linear(2.0, data_points)
+        results['bt5y'] = interpolate_linear(5.0, data_points)
+        results['bt10y'] = interpolate_linear(10.0, data_points)
+        
         print("="*60)
         
-        standard_rates = curve.get_standard_maturities()
-        
-        for key, result in standard_rates.items():
-            print(f"\n{key} ({result['target_years']} ans):")
-            print(f"  → Taux: {result['rate']:.3f}%")
-            print(f"  → Méthode: {result['method']}")
-            
-            if result['method'] == 'Interpolation linéaire':
-                print(f"  → Interpolation entre:")
-                print(f"     • {result['point_before']}: {result['rate_before']}% "
-                      f"({result['days_before']} jours)")
-                print(f"     • {result['point_after']}: {result['rate_after']}% "
-                      f"({result['days_after']} jours)")
-            
-            print(f"  → Maturité réelle: {result['actual_years']:.2f} ans "
-                  f"({result['actual_days']} jours)")
-            
-        return curve.export_for_finance_bladi()
-        
+        return results
+
     except Exception as e:
-        print(f"\n❌ ERREUR: {e}")
-        return {'error': str(e), 'BT2Y': None, 'BT5Y': None, 'BT10Y': None}
+        logger.error(f"Error fetching BKAM Treasury: {e}")
+        return results
 
 if __name__ == "__main__":
-    print(get_bkam_treasury_official())
+    logging.basicConfig(level=logging.INFO)
+    get_bkam_treasury_official()

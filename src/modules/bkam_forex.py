@@ -1,140 +1,69 @@
-# src/modules/bkam_forex.py
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'DNT': '1',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Cache-Control': 'max-age=0'
-}
-
-import pandas as pd
 import requests
+import pandas as pd
 from datetime import datetime
-import os
-import io
+from io import StringIO
+import logging
 
-
+logger = logging.getLogger(__name__)
 
 def get_bkam_forex_rates():
     """
-    Télécharge et extrait EUR/MAD et USD/MAD du CSV des cours de référence.
+    Fetches official EUR/MAD and USD/MAD rates.
+    Fixes the '107602' formatting error by forcing string parsing.
     """
-    print("\n" + "="*60)
-    print("EXTRACTION TAUX DE CHANGE BKAM")
-    print("="*60)
+    url = "https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-des-changes/Cours-de-change/Cours-de-reference"
     
-    # URL du CSV des taux de change (celle qui fonctionne)
-    CSV_URL = "https://www.bkam.ma/export/blockcsv/4550/5312b6def4ad0a94c5a992522868ac0a/cc51b5ce6878a3dc655dae26c47fddf8?block=cc51b5ce6878a3dc655dae26c47fddf8"
-    
-    rates = {'EUR/MAD': None, 'USD/MAD': None}
-    
-    try:
-        print(f"[{datetime.now()}] Téléchargement du CSV...")
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        response = requests.get(CSV_URL, headers=headers, timeout=30)
-        
-        if response.status_code != 200:
-            print(f"  ❌ Erreur HTTP: {response.status_code}")
-            return rates
-        
-        # Convertir le contenu en texte
-        content = response.content.decode('utf-8-sig')
-        
-        print("  ✅ CSV téléchargé")
-        print(f"  Taille: {len(content)} caractères")
-        print("\n  Aperçu du contenu:")
-        print("-" * 50)
-        print(content[:400])
-        print("-" * 50)
-        
-        # Méthode SIMPLE : parser ligne par ligne
-        lines = content.split('\n')
-        
-        for line in lines:
-            line = line.strip().strip('"')
-            if not line:
-                continue
-            
-            # Chercher les lignes avec EURO et DOLLAR
-            if 'EURO' in line.upper():
-                parts = line.split(';')
-                if len(parts) >= 2:
-                    # Prendre la première valeur (colonne "Moyen" du jour J)
-                    value = parts[1].replace(',', '.').strip()
-                    try:
-                        rates['EUR/MAD'] = float(value)
-                        print(f"  ✅ EUR/MAD extrait: {rates['EUR/MAD']}")
-                    except:
-                        pass
-            
-            elif 'DOLLAR U.S.A.' in line.upper():
-                parts = line.split(';')
-                if len(parts) >= 2:
-                    value = parts[1].replace(',', '.').strip()
-                    try:
-                        rates['USD/MAD'] = float(value)
-                        print(f"  ✅ USD/MAD extrait: {rates['USD/MAD']}")
-                    except:
-                        pass
-        
-        # Si la méthode simple échoue, utiliser pandas en sautant les premières lignes
-        if rates['EUR/MAD'] is None:
-            print("  ⚠️  Méthode simple échouée, tentative avec pandas...")
-            
-            # Sauvegarder pour analyse
-            downloads_dir = "/workspaces/finance-bladi-automation/downloads"
-            os.makedirs(downloads_dir, exist_ok=True)
-            filepath = os.path.join(downloads_dir, f"forex_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # Lire en sautant les 3 premières lignes (en-têtes)
-            try:
-                df = pd.read_csv(filepath, delimiter=';', skiprows=3, encoding='utf-8')
-                print(f"  DataFrame shape: {df.shape}")
-                print(df.head())
-                
-                # Chercher dans la première colonne
-                for idx, row in df.iterrows():
-                    if isinstance(row.iloc[0], str):
-                        if 'EURO' in row.iloc[0].upper():
-                            rates['EUR/MAD'] = float(str(row.iloc[1]).replace(',', '.'))
-                        elif 'DOLLAR U.S.A.' in row.iloc[0].upper():
-                            rates['USD/MAD'] = float(str(row.iloc[1]).replace(',', '.'))
-            except Exception as e:
-                print(f"  ❌ Erreur pandas: {e}")
-    
-    except Exception as e:
-        print(f"  ❌ Erreur générale: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    print("\n" + "="*60)
-    print("RÉSULTATS:")
-    print(f"  EUR/MAD: {rates['EUR/MAD']}")
-    print(f"  USD/MAD: {rates['USD/MAD']}")
-    print("="*60)
-    
-    # Fallback avec valeurs réalistes
-    if rates['EUR/MAD'] is None:
-        rates['EUR/MAD'] = 10.82
-        rates['USD/MAD'] = 9.78
-        rates['NOTE'] = 'FALLBACK'
-    
-    return rates
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+    }
 
-if __name__ == "__main__":
-    results = get_bkam_forex_rates()
-    print(f"\nSortie: {results}")
+    try:
+        logger.info(f"Connecting to BKAM Forex: {url}")
+        response = requests.get(url, headers=headers, timeout=20)
+        response.raise_for_status()
+        
+        # ✅ CRITICAL FIX: 'thousands=None' prevents 10,7602 becoming 107602
+        # We also convert to string immediately to handle the comma manually
+        dfs = pd.read_html(StringIO(response.text), thousands=None, decimal=',')
+        
+        if not dfs: return None
+        df = dfs[0]
+        
+        # Ensure we are working with strings for safety
+        df = df.astype(str)
+        
+        # Default column index for today's rate (usually index 1)
+        rate_col_idx = 1
+        
+        eur_val = None
+        usd_val = None
+        
+        for index, row in df.iterrows():
+            label = str(row.iloc[0]).upper()
+            raw_val = row.iloc[rate_col_idx]
+            
+            # Cleaning Logic
+            try:
+                # Replace comma with dot, remove spaces/invisible chars
+                clean_val_str = raw_val.replace(',', '.').replace('\xa0', '').strip()
+                val = float(clean_val_str)
+                
+                # ✅ SANITY CHECK IN MODULE
+                # If value is huge (e.g. 10760.2), divide it down
+                if val > 100:
+                    val = val / 10000.0
+                    
+            except: continue
+            
+            if 'EURO' in label:
+                eur_val = val
+            elif 'DOLLAR U.S' in label or 'DOLLAR US' in label:
+                usd_val = val
+                
+        logger.info(f"✅ BKAM Forex: EUR={eur_val}, USD={usd_val}")
+        return {'eur_mad': eur_val, 'usd_mad': usd_val}
+
+    except Exception as e:
+        logger.error(f"❌ Forex Error: {e}")
+        return None
