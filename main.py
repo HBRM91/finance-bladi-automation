@@ -205,12 +205,12 @@ class DataProcessor:
         return [[str(c) if c is not None and c != '' else '' for c in row]]
 
 # ============================================================================
-# GOOGLE SHEETS EXPORTER (FIXED)
+# GOOGLE SHEETS EXPORTER (FIXED FOR 'GOOGLE_CREDENTIALS' SECRET)
 # ============================================================================
 
 class GoogleSheetsExporter:
     def __init__(self):
-        # FIXED: Priority logic for Spreadsheet ID
+        # Priority logic for Spreadsheet ID
         env_id = os.environ.get('SPREADSHEET_ID')
         hardcoded_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
         
@@ -228,65 +228,75 @@ class GoogleSheetsExporter:
             import gspread
             from google.oauth2.service_account import Credentials
             
-            # Robust credentials finding
-            creds_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
-            if not creds_path or not os.path.exists(creds_path):
+            scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+            credentials = None
+
+            # --- 1. Load from Secret (GOOGLE_CREDENTIALS) ---
+            # This matches your existing secret name
+            secret_creds = os.environ.get('GOOGLE_CREDENTIALS')
+            
+            if secret_creds:
+                try:
+                    print("🔑 Loading credentials from 'GOOGLE_CREDENTIALS' environment variable...")
+                    creds_dict = json.loads(secret_creds)
+                    credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                except json.JSONDecodeError:
+                    print("❌ Error: 'GOOGLE_CREDENTIALS' is not valid JSON. Please check your GitHub Secret content.")
+                    return False
+            
+            # --- 2. Fallback: Local File (for local testing only) ---
+            if not credentials:
+                print("⚠️ Secret not found. Checking local files...")
                 possible_paths = [
                     'credentials.json',
                     os.path.join(PROJECT_ROOT, 'credentials.json'),
-                    os.path.join(os.getcwd(), 'credentials.json'),
-                    '/home/runner/work/finance-bladi-automation/finance-bladi-automation/credentials.json'
+                    os.path.join(os.getcwd(), 'credentials.json')
                 ]
                 for p in possible_paths:
                     if os.path.exists(p):
-                        creds_path = p
+                        print(f"✅ Found local file: {p}")
+                        credentials = Credentials.from_service_account_file(p, scopes=scopes)
                         break
             
-            if not creds_path or not os.path.exists(creds_path):
-                print(f"❌ Credentials not found")
+            if not credentials:
+                print("❌ Authentication failed: No valid credentials found in GOOGLE_CREDENTIALS secret or local file.")
                 return False
-                
-            print(f"✅ Using credentials: {creds_path}")
-            
-            scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-            credentials = Credentials.from_service_account_file(creds_path, scopes=scopes)
+
+            # --- 3. Update Sheet ---
             client = gspread.authorize(credentials)
-            
             print(f"📄 Opening spreadsheet: {self.spreadsheet_id}")
             spreadsheet = client.open_by_key(self.spreadsheet_id)
             
             try:
                 worksheet = spreadsheet.worksheet(self.sheet_name)
-                print(f"📋 Using existing sheet: '{self.sheet_name}'")
             except:
                 print(f"📝 Creating new sheet: '{self.sheet_name}'")
                 worksheet = spreadsheet.add_worksheet(title=self.sheet_name, rows=1000, cols=len(self.headers))
             
             self._ensure_headers(worksheet)
             
-            # ORIGINAL LOGIC: Check if today already exists
+            # Update Logic
             all_data = worksheet.get_all_values()
             today_date = datetime.now().strftime('%Y-%m-%d')
-            today_exists = False
-            existing_row = None
             
+            # Find if today exists (Column A)
+            row_index = None
             for i, row in enumerate(all_data[1:], start=2):
-                if row and len(row) > 0:
-                    try:
-                        row_date = row[0].split()[0]
-                        if row_date == today_date:
-                            today_exists = True
-                            existing_row = i
-                            break
-                    except: continue
+                if row and row[0].startswith(today_date):
+                    row_index = i
+                    break
             
             clean_row = data_row[0]
             
-            if today_exists and existing_row:
-                print(f"📝 Updating existing row {existing_row} for {today_date}...")
-                for col_idx, value in enumerate(clean_row, start=1):
-                    worksheet.update_cell(existing_row, col_idx, value)
-                print(f"✅ Updated row {existing_row}")
+            if row_index:
+                print(f"📝 Updating existing row {row_index} for {today_date}...")
+                # Update specific range to save API calls
+                cell_list = worksheet.range(f"A{row_index}:V{row_index}") # Adjust 'V' to your last column letter
+                for i, cell in enumerate(cell_list):
+                    if i < len(clean_row):
+                        cell.value = clean_row[i]
+                worksheet.update_cells(cell_list)
+                print(f"✅ Updated row {row_index}")
             else:
                 print(f"📝 Adding new row for {today_date}...")
                 worksheet.append_row(clean_row)
@@ -296,15 +306,15 @@ class GoogleSheetsExporter:
             
         except Exception as e:
             print(f"❌ Google Sheets export failed: {e}")
+            traceback.print_exc()
             return False
-    
+
     def _ensure_headers(self, worksheet) -> bool:
         try:
             first_row = worksheet.row_values(1)
             if not first_row or first_row[0] != 'Date':
                 worksheet.clear()
                 worksheet.append_row(self.headers)
-                return True
             return True
         except: return False
 
