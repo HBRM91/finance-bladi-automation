@@ -1,41 +1,40 @@
-name: Finance Bladi Daily Automation
+name: Finance Bladi Automation
 
 on:
   schedule:
-    - cron: '0 7 * * *'  # 7:00 AM UTC (8:00 AM Morocco)
-  workflow_dispatch:  # Allow manual run
+    - cron: '0 7 * * *'  # Daily at 7:00 AM UTC
+  workflow_dispatch:     # Manual trigger
 
 jobs:
-  automate:
+  run:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Python
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
-    - name: Install dependencies
+    - name: 📦 Install dependencies
       run: |
         pip install gspread google-auth pandas yfinance requests beautifulsoup4
         
-    - name: Setup credentials
+    - name: 🔑 Setup Google Sheets
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
       run: |
         echo "$GOOGLE_CREDENTIALS" > credentials.json
-        ls -la credentials.json
         
-    - name: Run automation
+    - name: 🚀 Run Automation
       run: python main.py
       
-    - name: Save results
-      if: always()
+    - name: 💾 Save Output
       uses: actions/upload-artifact@v4
       with:
-        name: results-${{ github.run_number }}
+        name: results
         path: |
           logs/
           data/
