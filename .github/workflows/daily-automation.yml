@@ -1,9 +1,12 @@
 name: Finance Data Automation
+env:
+  GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
 
 on:
   schedule:
     - cron: '0 7 * * 1-5'  # Runs at 7 AM UTC, Mon-Fri (8 AM Morocco time)
   workflow_dispatch:  # Allows manual trigger
+  
 
 jobs:
   collect-and-export:
