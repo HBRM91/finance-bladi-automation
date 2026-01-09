@@ -34,20 +34,39 @@ class UnifiedDataExporter:
         ]
     
     def _authenticate(self):
-        """Authenticate with Google Sheets API"""
+        """Authenticate with Google Sheets API - FIXED"""
         try:
+            # First, validate credentials.json
+            with open(self.credentials_path, 'r') as f:
+                import json
+                creds_data = json.load(f)
+                
+            # Check required fields
+            required_fields = ['type', 'project_id', 'private_key', 'client_email']
+            for field in required_fields:
+                if field not in creds_data:
+                    raise ValueError(f"Missing required field in credentials: {field}")
+            
+            print(f"✅ Credentials valid. Service account: {creds_data['client_email']}")
+            
             scopes = [
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/drive'
             ]
+            
             credentials = Credentials.from_service_account_file(
                 self.credentials_path, scopes=scopes
             )
             self.client = gspread.authorize(credentials)
-            logger.info("Google Sheets authentication successful")
+            print("✅ Google Sheets authentication successful")
             return True
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ credentials.json is INVALID JSON: {e}")
+            print("Please check your GitHub Secret - it must be exact JSON")
+            return False
         except Exception as e:
-            logger.error(f"Google Sheets authentication failed: {str(e)}")
+            print(f"❌ Authentication failed: {e}")
             return False
     
     def _ensure_headers_exist(self, worksheet) -> bool:

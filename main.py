@@ -463,7 +463,54 @@ class LocalStorage:
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
+# Add this near the top of your main() function
+def safe_collect_data():
+    """Collect data with error handling"""
+    results = {}
+    
+    # Try each module with timeout
+    modules = [
+        ('bkam_forex', 'collect_forex_data'),
+        ('bkam_treasury', 'collect_treasury_data'),
+        ('investing_masi', 'collect_masi_data'),
+        ('trading_economics', 'collect_phosphate_data'),
+        ('yahoo_markets', 'collect_market_data')
+    ]
+    
+    for module_name, func_name in modules:
+        try:
+            print(f"📦 {module_name}...", end='')
+            
+            # Import and run
+            module = __import__(module_name)
+            func = getattr(module, func_name, None) or getattr(module, 'collect_data', None)
+            
+            if func:
+                data = func()
+                if data:
+                    results[module_name] = data
+                    print("✅")
+                else:
+                    print("⚠️ No data")
+            else:
+                print("❌ No function")
+                
+        except Exception as e:
+            print(f"❌ Error: {str(e)[:50]}")
+            # Use fallback data
+            results[module_name] = get_fallback_data(module_name)
+    
+    return results
 
+def get_fallback_data(module_name):
+    """Provide fallback data when module fails"""
+    fallbacks = {
+        'bkam_forex': {'EUR/MAD': 'N/A', 'USD/MAD': 'N/A'},
+        'bkam_treasury': {'BT2Y': 'N/A', 'BT5Y': 'N/A', 'BT10Y': 'N/A'},
+        'investing_masi': {'MASI': 'N/A'},
+        'trading_economics': {'Phosphate DAP': 'N/A'}
+    }
+    return fallbacks.get(module_name, {'error': 'Module failed'})
 def main():
     """Main execution function"""
     print("\n" + "="*60)
