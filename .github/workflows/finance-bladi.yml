@@ -1,30 +1,23 @@
-# .github/workflows/finance-bladi-daily.yml
-name: Finance Bladi - Daily Data Pipeline
+# .github/workflows/daily-automation.yml
+name: Daily Finance Bladi Automation
 
 on:
-  # Planification quotidienne 7:00 UTC (8:00 Maroc)
+  # 1ère tentative : 8h UTC = 9h Maroc (après publication BKAM)
   schedule:
     - cron: '0 7 * * 1-5'  # Lundi à Vendredi à 07:00 UTC
-  # Permet de déclencher manuellement depuis l'interface GitHub
+  # Déclenchement manuel depuis GitHub
   workflow_dispatch:
-    inputs:
-      test-mode:
-        description: 'Run in test mode'
-        required: false
-        default: 'false'
-
-# Permissions nécessaires
-permissions:
-  contents: write
-  actions: read
+  # Déclenchement par webhook
+  repository_dispatch:
+    types: [trigger_daily]
 
 jobs:
-  collect-and-process:
+  run-automation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
     steps:
-    - name: 📥 Checkout repository
+    - name: 📥 Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
@@ -37,93 +30,25 @@ jobs:
         
     - name: 📦 Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install -r requirements.txt
-        # Dépendances principales
-        pip install yfinance pandas requests gspread oauth2client selenium beautifulsoup4
+        pip install yfinance pandas requests gspread oauth2client
         
-    - name: 🔧 Setup Chrome for Selenium
+    - name: 🔑 Setup Google Sheets credentials
       run: |
-        sudo apt-get update
-        sudo apt-get install -y chromium-browser chromium-chromedriver
+        echo '${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}' > credentials.json
         
-    - name: 📊 Run Data Collection
-      id: collect
+    - name: 🚀 Run Finance Bladi Automation
       run: |
-        echo "🕐 Début de la collecte: $(date)"
-        echo "📁 Workspace: $GITHUB_WORKSPACE"
-        
-        # Exécuter le script principal
-        cd "$GITHUB_WORKSPACE"
+        echo "🕐 Starting automation at $(date)"
         python src/main.py
+        echo "✅ Automation completed at $(date)"
         
-        # Vérifier si des fichiers ont été créés
-        if ls downloads/*.json 1> /dev/null 2>&1; then
-          echo "✅ Données collectées avec succès"
-          echo "data_collected=true" >> $GITHUB_OUTPUT
-        else
-          echo "❌ Aucun fichier de données généré"
-          echo "data_collected=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-        
-    - name: 💾 Save Data to Repository
-      if: steps.collect.outputs.data_collected == 'true'
-      run: |
-        echo "💾 Sauvegarde des données dans le dépôt..."
-        
-        # Configurer git
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git config --local user.name "GitHub Actions"
-        
-        # Créer dossier data s'il n'existe pas
-        mkdir -p historical_data
-        
-        # Copier le dernier fichier JSON
-        LATEST_FILE=$(ls -t downloads/finance_bladi_data_*.json | head -1)
-        DATE_TODAY=$(date '+%Y%m%d')
-        
-        if [ -f "$LATEST_FILE" ]; then
-          # Copier pour archivage
-          cp "$LATEST_FILE" "historical_data/data_$DATE_TODAY.json"
-          
-          # Mettre à jour le fichier "latest"
-          cp "$LATEST_FILE" "historical_data/latest.json"
-          
-          # Commit et push
-          git add historical_data/
-          git commit -m "📈 Data update $DATE_TODAY [skip ci]"
-          git push
-          
-          echo "✅ Données sauvegardées: historical_data/data_$DATE_TODAY.json"
-        else
-          echo "⚠️  Aucun fichier de données trouvé"
-        fi
-        
-    - name: 📤 Upload Artifacts
+    - name: 💾 Upload artifacts
       uses: actions/upload-artifact@v4
+      if: always()
       with:
-        name: market-data-${{ github.run_number }}
+        name: finance-bladi-data-${{ github.run_id }}
         path: |
-          downloads/
-          historical_data/latest.json
+          data/
+          logs/
         retention-days: 7
-        
-    - name: 📧 Notification on Failure
-      if: failure()
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: smtp.gmail.com
-        server_port: 465
-        username: ${{secrets.MAIL_USERNAME}}
-        password: ${{secrets.MAIL_PASSWORD}}
-        subject: "❌ Finance Bladi Pipeline Failed"
-        to: votre-email@example.com
-        from: GitHub Actions
-        body: "Workflow failed: ${{ github.run_id }}\nView logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-        
-    - name: 🎉 Success Notification
-      if: success()
-      run: |
-        echo "✅ Pipeline exécuté avec succès à $(date)"
-        echo "🔗 Voir les artefacts: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
