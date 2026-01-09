@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Finance Bladi Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .card { border: 1px solid #ddd; padding: 15px; margin: 10px; border-radius: 5px; }
+        .positive { color: green; }
+        .negative { color: red; }
+        .header { background: #f0f0f0; padding: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Finance Bladi Dashboard</h1>
+        <p>Last updated: {{ data.last_updated }}</p>
+    </div>
+    
+    <div class="card">
+        <h2>💰 BKAM Forex Rates</h2>
+        {% if data.forex %}
+            <p>EUR/MAD: <strong>{{ data.forex.get('EUR/MAD', 'N/A') }}</strong></p>
+            <p>USD/MAD: <strong>{{ data.forex.get('USD/MAD', 'N/A') }}</strong></p>
+        {% else %}
+            <p>No forex data available</p>
+        {% endif %}
+    </div>
+    
+    <div class="card">
+        <h2>📈 BKAM Treasury Rates</h2>
+        {% if data.treasury %}
+            <p>BT2Y: <strong>{{ data.treasury.get('BT2Y', 'N/A') }}%</strong></p>
+            <p>BT5Y: <strong>{{ data.treasury.get('BT5Y', 'N/A') }}%</strong></p>
+            <p>BT10Y: <strong>{{ data.treasury.get('BT10Y', 'N/A') }}%</strong></p>
+        {% else %}
+            <p>No treasury data available</p>
+        {% endif %}
+    </div>
+    
+    <div class="card">
+        <h2>🌍 Market Data</h2>
+        {% if data.markets %}
+            <p>Brent Oil: <strong>${{ data.markets.get('BRENT', 'N/A') }}</strong></p>
+            <p>Gold: <strong>${{ data.markets.get('GOLD', 'N/A') }}</strong></p>
+            <p>Bitcoin: <strong>${{ data.markets.get('BITCOIN', 'N/A') }}</strong></p>
+            <p>S&P 500: <strong>{{ data.markets.get('SP500', 'N/A') }}</strong></p>
+        {% else %}
+            <p>No market data available</p>
+        {% endif %}
+    </div>
+    
+    <div style="margin-top: 20px;">
+        <a href="/api/latest" target="_blank">View Raw JSON Data</a> |
+        <a href="https://docs.google.com/spreadsheets/d/1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90" target="_blank">Open Google Sheet</a>
+    </div>
+</body>
+</html>
