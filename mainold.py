@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 FINANCE BLADI AUTOMATION - FIXED VERSION
-Handles credentials path issues and improves debugging
+Handles nan values and improves data extraction
 """
 
 import os
@@ -292,80 +292,42 @@ class DataProcessor:
         return [cleaned_row]
 
 # ============================================================================
-# GOOGLE SHEETS EXPORTER - FIXED CREDENTIALS PATH
+# GOOGLE SHEETS EXPORTER - FIXED FOR nan
 # ============================================================================
 
 class GoogleSheetsExporter:
-    """Exports data to Google Sheets - FIXED credentials path"""
+    """Exports data to Google Sheets - FIXED for nan values"""
     
-    def __init__(self, credentials_path: str = None):
-        self.spreadsheet_id = os.environ.get('SPREADSHEET_ID', '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90')
+    def __init__(self):
+        self.spreadsheet_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
         self.sheet_name = 'Finance Bladi'
         self.headers = DataProcessor.COLUMNS
-        
-        # Determine credentials path
-        if credentials_path:
-            self.credentials_path = credentials_path
-        else:
-            # Try common locations
-            possible_paths = [
-                'credentials.json',
-                os.path.join(os.getcwd(), 'credentials.json'),
-                os.path.join(PROJECT_ROOT, 'credentials.json'),
-                os.path.join(os.path.dirname(__file__), 'credentials.json'),
-                '/home/runner/work/finance-bladi-automation/finance-bladi-automation/credentials.json'
-            ]
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    self.credentials_path = path
-                    break
-            else:
-                # Default to project root
-                self.credentials_path = os.path.join(PROJECT_ROOT, 'credentials.json')
     
     def export(self, data_row: List[List[Any]]) -> bool:
-        """Export data to Google Sheets"""
+        """Export data to Google Sheets - FIXED version"""
         try:
             print("\n📤 Connecting to Google Sheets...")
             
             import gspread
             from google.oauth2.service_account import Credentials
+            import json as json_lib
             
             # Check credentials
-            print(f"🔍 Looking for credentials at: {self.credentials_path}")
-            if not os.path.exists(self.credentials_path):
-                print(f"❌ Credentials not found: {self.credentials_path}")
-                print(f"📁 Current directory: {os.getcwd()}")
-                print("📂 Listing files in current directory:")
-                os.system("ls -la")
+            creds_path = os.path.join(PROJECT_ROOT, 'credentials.json')
+            if not os.path.exists(creds_path):
+                print(f"❌ Credentials not found: {creds_path}")
                 return False
             
-            print(f"✅ Found credentials: {self.credentials_path}")
-            
-            # Validate JSON before using it
-            try:
-                with open(self.credentials_path, 'r') as f:
-                    content = f.read().strip()
-                    if not content:
-                        print("❌ Credentials file is empty!")
-                        return False
-                    
-                    import json
-                    creds_data = json.loads(content)
-                    print(f"✅ JSON is valid. Service account: {creds_data.get('client_email', 'Unknown')}")
-            except json.JSONDecodeError as e:
-                print(f"❌ Invalid JSON in credentials: {e}")
-                return False
+            print(f"✅ Using credentials: {creds_path}")
             
             # Authenticate
             scopes = ['https://www.googleapis.com/auth/spreadsheets',
                      'https://www.googleapis.com/auth/drive']
-            credentials = Credentials.from_service_account_file(self.credentials_path, scopes=scopes)
+            credentials = Credentials.from_service_account_file(creds_path, scopes=scopes)
             client = gspread.authorize(credentials)
             
             # Open spreadsheet
-            print(f"📄 Opening spreadsheet ID: {self.spreadsheet_id}")
+            print(f"📄 Opening spreadsheet: {self.spreadsheet_id}")
             spreadsheet = client.open_by_key(self.spreadsheet_id)
             print(f"✅ Spreadsheet: {spreadsheet.title}")
             
@@ -403,7 +365,7 @@ class GoogleSheetsExporter:
                     except:
                         continue
             
-            # Prepare data for export
+            # Prepare data for export - ensure no nan values
             clean_data_row = []
             for cell in data_row[0]:
                 if isinstance(cell, float) and math.isnan(cell):
@@ -415,7 +377,7 @@ class GoogleSheetsExporter:
             
             if today_exists and existing_row:
                 # Update existing row
-                print(f"📝 Updating existing row for {today_date} (row {existing_row})...")
+                print(f"📝 Updating existing row for {today_date}...")
                 for col_idx, value in enumerate(clean_data_row, start=1):
                     worksheet.update_cell(existing_row, col_idx, value)
                 print(f"✅ Updated row {existing_row}")
@@ -424,10 +386,9 @@ class GoogleSheetsExporter:
                 print(f"📝 Adding new row for {today_date}...")
                 try:
                     worksheet.append_row(clean_data_row)
-                    print(f"✅ Appended new row at position {len(all_data) + 1}")
+                    print(f"✅ Appended new row")
                 except Exception as append_error:
-                    print(f"⚠️ Append failed: {append_error}")
-                    print("Trying cell-by-cell update...")
+                    print(f"⚠️ Append failed, trying cell-by-cell update...")
                     # Fallback to cell-by-cell update
                     next_row = len(all_data) + 1
                     for col_idx, value in enumerate(clean_data_row, start=1):
@@ -454,7 +415,7 @@ class GoogleSheetsExporter:
                 print(f"✅ Created {len(self.headers)} headers")
                 return True
             else:
-                print(f"✅ Headers already exist: {first_row[0]}...")
+                print("✅ Headers already exist")
                 return True
         except Exception as e:
             print(f"❌ Error with headers: {e}")
@@ -502,71 +463,71 @@ class LocalStorage:
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
+# Add this near the top of your main() function
+def safe_collect_data():
+    """Collect data with error handling"""
+    results = {}
+    
+    # Try each module with timeout
+    modules = [
+        ('bkam_forex', 'collect_forex_data'),
+        ('bkam_treasury', 'collect_treasury_data'),
+        ('investing_masi', 'collect_masi_data'),
+        ('trading_economics', 'collect_phosphate_data'),
+        ('yahoo_markets', 'collect_market_data')
+    ]
+    
+    for module_name, func_name in modules:
+        try:
+            print(f"📦 {module_name}...", end='')
+            
+            # Import and run
+            module = __import__(module_name)
+            func = getattr(module, func_name, None) or getattr(module, 'collect_data', None)
+            
+            if func:
+                data = func()
+                if data:
+                    results[module_name] = data
+                    print("✅")
+                else:
+                    print("⚠️ No data")
+            else:
+                print("❌ No function")
+                
+        except Exception as e:
+            print(f"❌ Error: {str(e)[:50]}")
+            # Use fallback data
+            results[module_name] = get_fallback_data(module_name)
+    
+    return results
 
+def get_fallback_data(module_name):
+    """Provide fallback data when module fails"""
+    fallbacks = {
+        'bkam_forex': {'EUR/MAD': 'N/A', 'USD/MAD': 'N/A'},
+        'bkam_treasury': {'BT2Y': 'N/A', 'BT5Y': 'N/A', 'BT10Y': 'N/A'},
+        'investing_masi': {'MASI': 'N/A'},
+        'trading_economics': {'Phosphate DAP': 'N/A'}
+    }
+    return fallbacks.get(module_name, {'error': 'Module failed'})
 def main():
     """Main execution function"""
     print("\n" + "="*60)
     print("🚀 FINANCE BLADI AUTOMATION")
     print("="*60)
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Debug information
-    print(f"\n📍 Current directory: {os.getcwd()}")
-    print(f"📍 Project root: {PROJECT_ROOT}")
-    
-    # Look for credentials in environment variable first
-    creds_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
-    if creds_path:
-        print(f"🔑 Using credentials path from env: {creds_path}")
-    else:
-        # Try to find credentials
-        possible_paths = [
-            'credentials.json',
-            os.path.join(os.getcwd(), 'credentials.json'),
-            os.path.join(PROJECT_ROOT, 'credentials.json'),
-            '/home/runner/work/finance-bladi-automation/finance-bladi-automation/credentials.json'
-        ]
-        
-        print("🔍 Looking for credentials file...")
-        for path in possible_paths:
-            exists = os.path.exists(path)
-            print(f"   {path}: {'✅ Found' if exists else '❌ Missing'}")
-            if exists and not creds_path:
-                creds_path = path
-        
-        if not creds_path:
-            print("❌ No credentials.json found!")
-            return False
-    
-    # Verify credentials file exists and is valid
-    if not os.path.exists(creds_path):
-        print(f"❌ Credentials file not found: {creds_path}")
-        return False
-    
-    # Check if credentials file is valid JSON
-    try:
-        with open(creds_path, 'r') as f:
-            content = f.read()
-            if not content.strip():
-                print("❌ Credentials file is empty!")
-                return False
-            
-            import json
-            creds_data = json.loads(content)
-            print(f"✅ Credentials valid. Service account: {creds_data.get('client_email', 'Unknown')}")
-    except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON in credentials: {e}")
-        return False
+    print()
     
     # Initialize components
     collector = ModuleCollector()
     processor = DataProcessor()
-    sheets_exporter = GoogleSheetsExporter(credentials_path=creds_path)
+    sheets_exporter = GoogleSheetsExporter()
     local_storage = LocalStorage()
     
     try:
         # 1. Collect data from all modules
-        print("\n📦 Collecting data from modules...")
+        print("📦 Collecting data from modules...")
         raw_data = collector.collect_all()
         
         if not raw_data:
@@ -628,7 +589,7 @@ def main():
             print(f"   • Sheet: '{sheets_exporter.sheet_name}'")
             print(f"   • Columns: {len(sheets_exporter.headers)}")
             print(f"   • URL: https://docs.google.com/spreadsheets/d/{sheets_exporter.spreadsheet_id}")
-            print(f"   • Today's data: {datetime.now().strftime('%Y-%m-%d')}")
+            print(f"   • Today's row added: {datetime.now().strftime('%Y-%m-%d')}")
         else:
             print("\n❌ Google Sheets export failed")
         
