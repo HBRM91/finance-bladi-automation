@@ -12,3 +12,4 @@ requests
 lxml
 gspread
 google-auth
+lxml
