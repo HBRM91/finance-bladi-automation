@@ -1,8 +1,11 @@
-#!/usr/bin/env python3
-"""
+{
+type: "file_update",
+fileName: "main.py",
+content: """#!/usr/bin/env python3
+\"\"\"
 FINANCE BLADI AUTOMATION - FIXED VERSION
-Handles credentials path issues and improves debugging
-"""
+Handles credentials path issues, empty env vars, and improves debugging
+\"\"\"
 
 import os
 import sys
@@ -46,15 +49,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# DATA CLEANER - FIXES nan VALUES
+# DATA CLEANER
 # ============================================================================
 
 class DataCleaner:
-    """Cleans and fixes data before export"""
+    \"\"\"Cleans and fixes data before export\"\"\"
     
     @staticmethod
     def fix_nan_values(data: Any) -> Any:
-        """Replace nan values with empty strings"""
+        \"\"\"Replace nan values with empty strings\"\"\"
         if isinstance(data, dict):
             return {k: DataCleaner.fix_nan_values(v) for k, v in data.items()}
         elif isinstance(data, list):
@@ -68,18 +71,18 @@ class DataCleaner:
     
     @staticmethod
     def clean_data_for_export(raw_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Clean entire dataset for Google Sheets"""
+        \"\"\"Clean entire dataset for Google Sheets\"\"\"
         cleaned = {}
         for key, value in raw_data.items():
             cleaned[key] = DataCleaner.fix_nan_values(value)
         return cleaned
 
 # ============================================================================
-# MODULE COLLECTOR - IMPROVED
+# MODULE COLLECTOR
 # ============================================================================
 
 class ModuleCollector:
-    """Collects data from all financial modules"""
+    \"\"\"Collects data from all financial modules\"\"\"
     
     MODULES = [
         ('bkam_forex', 'bkam_forex'),
@@ -94,7 +97,7 @@ class ModuleCollector:
         self.errors = []
     
     def collect_all(self) -> Dict[str, Any]:
-        """Collect data from all modules"""
+        \"\"\"Collect data from all modules\"\"\"
         logger.info("="*60)
         logger.info("STARTING DATA COLLECTION")
         logger.info("="*60)
@@ -122,12 +125,15 @@ class ModuleCollector:
         return self.results
     
     def _collect_module(self, display_name: str, module_name: str) -> Any:
-        """Collect data from a single module"""
         try:
             module = __import__(module_name)
             
-            # Try different function names
-            if hasattr(module, 'collect_data'):
+            # Function discovery logic
+            if hasattr(module, 'get_bkam_treasury_official'): # Specific check for treasury
+                return module.get_bkam_treasury_official()
+            elif hasattr(module, 'get_bkam_forex_rates'): # Specific check for forex
+                return module.get_bkam_forex_rates()
+            elif hasattr(module, 'collect_data'):
                 return module.collect_data()
             elif hasattr(module, 'main'):
                 return module.main()
@@ -136,7 +142,6 @@ class ModuleCollector:
             elif hasattr(module, 'get_data'):
                 return module.get_data()
             else:
-                # Find any callable that looks like a main function
                 for attr_name in dir(module):
                     if not attr_name.startswith('_'):
                         attr = getattr(module, attr_name)
@@ -145,20 +150,18 @@ class ModuleCollector:
                                 return attr()
                             except:
                                 continue
-                
                 raise Exception(f"No executable function found in {module_name}")
                 
         except Exception as e:
             raise Exception(f"Module error: {str(e)}")
 
 # ============================================================================
-# DATA PROCESSOR - IMPROVED EXTRACTION
+# DATA PROCESSOR
 # ============================================================================
 
 class DataProcessor:
-    """Processes raw data into unified format for Google Sheets"""
+    \"\"\"Processes raw data into unified format for Google Sheets\"\"\"
     
-    # Define the exact column order for Google Sheets
     COLUMNS = [
         'Date',
         'EUR/MAD', 'USD/MAD',
@@ -173,16 +176,13 @@ class DataProcessor:
     
     @staticmethod
     def _extract_nested_value(data: Any, *paths: List[str]) -> Any:
-        """Extract value from nested dicts using dot notation paths"""
         if not isinstance(data, dict):
             return ''
         
         for path in paths:
             try:
-                # Split path by dots for nested access
                 keys = path.split('.')
                 current = data
-                
                 for key in keys:
                     if isinstance(current, dict) and key in current:
                         current = current[key]
@@ -191,44 +191,31 @@ class DataProcessor:
                         break
                 
                 if current is not None and current != '':
-                    # Clean the value
                     if isinstance(current, float) and math.isnan(current):
                         return ''
                     return current
-                    
             except (KeyError, AttributeError, TypeError):
                 continue
-        
         return ''
     
     @staticmethod
     def _clean_masi_value(value: Any) -> Any:
-        """Clean MASI value (remove commas from '19,445.46')"""
         if isinstance(value, str):
-            # Remove commas from numbers like "19,445.46"
             return value.replace(',', '')
         return value
     
     def process(self, raw_data: Dict[str, Any]) -> List[List[Any]]:
-        """Convert raw module data to unified row format"""
         today = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         row = [today]
         
-        # Clean the data first
         raw_data = DataCleaner.fix_nan_values(raw_data)
         
         # 1. EUR/MAD
-        eur_mad = self._extract_nested_value(
-            raw_data.get('bkam_forex', {}),
-            'EUR/MAD', 'eur_mad', 'EUR_MAD'
-        )
+        eur_mad = self._extract_nested_value(raw_data.get('bkam_forex', {}), 'EUR/MAD', 'eur_mad', 'EUR_MAD')
         row.append(eur_mad if eur_mad not in ['', None] else '')
         
         # 2. USD/MAD
-        usd_mad = self._extract_nested_value(
-            raw_data.get('bkam_forex', {}),
-            'USD/MAD', 'usd_mad', 'USD_MAD'
-        )
+        usd_mad = self._extract_nested_value(raw_data.get('bkam_forex', {}), 'USD/MAD', 'usd_mad', 'USD_MAD')
         row.append(usd_mad if usd_mad not in ['', None] else '')
         
         # 3-5. Treasury rates
@@ -238,48 +225,32 @@ class DataProcessor:
         row.append(self._extract_nested_value(treasury_data, 'BT10Y', 'bt10y', '10Y'))
         
         # 6. MASI
-        masi_value = self._extract_nested_value(
-            raw_data.get('investing_masi', {}),
-            'MASI', 'masi', 'value'
-        )
+        masi_value = self._extract_nested_value(raw_data.get('investing_masi', {}), 'MASI', 'masi', 'value')
         row.append(self._clean_masi_value(masi_value) if masi_value not in ['', None] else '')
         
         # 7. Phosphate DAP
-        phosphate_value = self._extract_nested_value(
-            raw_data.get('trading_economics', {}),
-            'Phosphate DAP', 'phosphate', 'DAP', 'value', 'PHOSPHATE_DAP'
-        )
+        phosphate_value = self._extract_nested_value(raw_data.get('trading_economics', {}), 'Phosphate DAP', 'phosphate', 'DAP', 'value', 'PHOSPHATE_DAP')
         row.append(phosphate_value if phosphate_value not in ['', None] else '')
         
         # 8-20. Yahoo Finance data
         yahoo_data = raw_data.get('yahoo_markets', {})
-        
-        # Extract Yahoo values with better fallbacks
         yahoo_extractors = [
-            ('BRENT', ['BRENT', 'brent']),
-            ('WTI', ['WTI', 'wti']),
-            ('GOLD', ['GOLD', 'gold', 'XAU']),
-            ('SILVER', ['SILVER', 'silver', 'XAG']),
-            ('BITCOIN', ['BITCOIN', 'bitcoin', 'BTC']),
-            ('EURUSD', ['EURUSD', 'eurusd', 'EUR/USD']),
-            ('USDJPY', ['USDJPY', 'usdjpy', 'USD/JPY']),
-            ('GBPUSD', ['GBPUSD', 'gbpusd', 'GBP/USD']),
-            ('SP500', ['SP500', 'sp500', 'S&P500', '^GSPC']),
-            ('DJIA', ['DJIA', 'dow', 'DOW', '^DJI']),
-            ('NASDAQ', ['NASDAQ', 'nasdaq', '^IXIC', 'NAS100']),
-            ('US10Y', ['US10Y', 'us10y', '10Y', 'UST10Y']),
+            ('BRENT', ['BRENT', 'brent']), ('WTI', ['WTI', 'wti']),
+            ('GOLD', ['GOLD', 'gold', 'XAU']), ('SILVER', ['SILVER', 'silver', 'XAG']),
+            ('BITCOIN', ['BITCOIN', 'bitcoin', 'BTC']), ('EURUSD', ['EURUSD', 'eurusd', 'EUR/USD']),
+            ('USDJPY', ['USDJPY', 'usdjpy', 'USD/JPY']), ('GBPUSD', ['GBPUSD', 'gbpusd', 'GBP/USD']),
+            ('SP500', ['SP500', 'sp500', 'S&P500', '^GSPC']), ('DJIA', ['DJIA', 'dow', 'DOW', '^DJI']),
+            ('NASDAQ', ['NASDAQ', 'nasdaq', '^IXIC', 'NAS100']), ('US10Y', ['US10Y', 'us10y', '10Y', 'UST10Y']),
             ('VIX', ['VIX', 'vix', '^VIX'])
         ]
         
         for _, keys in yahoo_extractors:
             value = self._extract_nested_value(yahoo_data, *keys)
-            # Ensure nan values are empty strings
             if isinstance(value, float) and math.isnan(value):
                 row.append('')
             else:
                 row.append(value if value not in ['', None] else '')
         
-        # Clean the entire row
         cleaned_row = []
         for cell in row:
             if isinstance(cell, float) and math.isnan(cell):
@@ -292,118 +263,57 @@ class DataProcessor:
         return [cleaned_row]
 
 # ============================================================================
-# GOOGLE SHEETS EXPORTER - FIXED CREDENTIALS PATH
+# GOOGLE SHEETS EXPORTER - FIXED
 # ============================================================================
 
 class GoogleSheetsExporter:
-    """Exports data to Google Sheets - FIXED credentials path"""
+    \"\"\"Exports data to Google Sheets - FIXED credentials and ID logic\"\"\"
     
     def __init__(self, credentials_path: str = None):
-        self.spreadsheet_id = os.environ.get('SPREADSHEET_ID', '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90')
+        # FIX: Check if env var exists AND is not empty, otherwise use default
+        env_id = os.environ.get('SPREADSHEET_ID')
+        if env_id and env_id.strip():
+            self.spreadsheet_id = env_id
+            print(f"📋 Using Spreadsheet ID from environment: {self.spreadsheet_id[:5]}...")
+        else:
+            self.spreadsheet_id = '1unwXUkxs7boI1I29iumlJd3E9WcK9BngF_D4NFWDb90'
+            print(f"📋 Using Default Spreadsheet ID: {self.spreadsheet_id[:5]}...")
+            
         self.sheet_name = 'Finance Bladi'
         self.headers = DataProcessor.COLUMNS
         
-        # Determine credentials path
         if credentials_path:
             self.credentials_path = credentials_path
         else:
-            # Try common locations
-            possible_paths = [
-                'credentials.json',
-                os.path.join(os.getcwd(), 'credentials.json'),
-                os.path.join(PROJECT_ROOT, 'credentials.json'),
-                os.path.join(os.path.dirname(__file__), 'credentials.json'),
-                '/home/runner/work/finance-bladi-automation/finance-bladi-automation/credentials.json'
-            ]
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    self.credentials_path = path
-                    break
-            else:
-                # Default to project root
-                self.credentials_path = os.path.join(PROJECT_ROOT, 'credentials.json')
+            self.credentials_path = os.path.join(PROJECT_ROOT, 'credentials.json')
     
     def export(self, data_row: List[List[Any]]) -> bool:
-        """Export data to Google Sheets"""
         try:
-            print("\n📤 Connecting to Google Sheets...")
-            
+            print("\\n📤 Connecting to Google Sheets...")
             import gspread
             from google.oauth2.service_account import Credentials
             
-            # Check credentials
-            print(f"🔍 Looking for credentials at: {self.credentials_path}")
             if not os.path.exists(self.credentials_path):
                 print(f"❌ Credentials not found: {self.credentials_path}")
-                print(f"📁 Current directory: {os.getcwd()}")
-                print("📂 Listing files in current directory:")
-                os.system("ls -la")
                 return False
             
-            print(f"✅ Found credentials: {self.credentials_path}")
-            
-            # Validate JSON before using it
-            try:
-                with open(self.credentials_path, 'r') as f:
-                    content = f.read().strip()
-                    if not content:
-                        print("❌ Credentials file is empty!")
-                        return False
-                    
-                    import json
-                    creds_data = json.loads(content)
-                    print(f"✅ JSON is valid. Service account: {creds_data.get('client_email', 'Unknown')}")
-            except json.JSONDecodeError as e:
-                print(f"❌ Invalid JSON in credentials: {e}")
-                return False
-            
-            # Authenticate
-            scopes = ['https://www.googleapis.com/auth/spreadsheets',
-                     'https://www.googleapis.com/auth/drive']
+            scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
             credentials = Credentials.from_service_account_file(self.credentials_path, scopes=scopes)
             client = gspread.authorize(credentials)
             
-            # Open spreadsheet
             print(f"📄 Opening spreadsheet ID: {self.spreadsheet_id}")
             spreadsheet = client.open_by_key(self.spreadsheet_id)
             print(f"✅ Spreadsheet: {spreadsheet.title}")
             
-            # Get or create worksheet
             try:
                 worksheet = spreadsheet.worksheet(self.sheet_name)
-                print(f"📋 Using existing sheet: '{self.sheet_name}'")
             except:
                 print(f"📝 Creating new sheet: '{self.sheet_name}'")
-                worksheet = spreadsheet.add_worksheet(
-                    title=self.sheet_name,
-                    rows=1000,
-                    cols=len(self.headers)
-                )
+                worksheet = spreadsheet.add_worksheet(title=self.sheet_name, rows=1000, cols=len(self.headers))
             
-            # ENSURE HEADERS EXIST
             self._ensure_headers(worksheet)
             
-            # Get all existing data
-            all_data = worksheet.get_all_values()
-            
-            # Check if today already exists
-            today_date = datetime.now().strftime('%Y-%m-%d')
-            today_exists = False
-            existing_row = None
-            
-            for i, row in enumerate(all_data[1:], start=2):
-                if row and row[0]:
-                    try:
-                        row_date = row[0].split()[0]
-                        if row_date == today_date:
-                            today_exists = True
-                            existing_row = i
-                            break
-                    except:
-                        continue
-            
-            # Prepare data for export
+            # Append data
             clean_data_row = []
             for cell in data_row[0]:
                 if isinstance(cell, float) and math.isnan(cell):
@@ -413,28 +323,8 @@ class GoogleSheetsExporter:
                 else:
                     clean_data_row.append(str(cell))
             
-            if today_exists and existing_row:
-                # Update existing row
-                print(f"📝 Updating existing row for {today_date} (row {existing_row})...")
-                for col_idx, value in enumerate(clean_data_row, start=1):
-                    worksheet.update_cell(existing_row, col_idx, value)
-                print(f"✅ Updated row {existing_row}")
-            else:
-                # Append new row
-                print(f"📝 Adding new row for {today_date}...")
-                try:
-                    worksheet.append_row(clean_data_row)
-                    print(f"✅ Appended new row at position {len(all_data) + 1}")
-                except Exception as append_error:
-                    print(f"⚠️ Append failed: {append_error}")
-                    print("Trying cell-by-cell update...")
-                    # Fallback to cell-by-cell update
-                    next_row = len(all_data) + 1
-                    for col_idx, value in enumerate(clean_data_row, start=1):
-                        worksheet.update_cell(next_row, col_idx, value)
-                    print(f"✅ Added row {next_row} cell-by-cell")
-            
-            print("🎯 Google Sheets export completed successfully")
+            worksheet.append_row(clean_data_row)
+            print(f"✅ Appended new row successfully")
             return True
             
         except Exception as e:
@@ -443,21 +333,14 @@ class GoogleSheetsExporter:
             return False
     
     def _ensure_headers(self, worksheet) -> bool:
-        """Make sure headers exist in first row"""
         try:
             first_row = worksheet.row_values(1)
-            
             if not first_row or first_row[0] != 'Date':
-                print("📋 Creating headers...")
                 worksheet.clear()
                 worksheet.append_row(self.headers)
-                print(f"✅ Created {len(self.headers)} headers")
                 return True
-            else:
-                print(f"✅ Headers already exist: {first_row[0]}...")
-                return True
-        except Exception as e:
-            print(f"❌ Error with headers: {e}")
+            return True
+        except Exception:
             return False
 
 # ============================================================================
@@ -465,38 +348,29 @@ class GoogleSheetsExporter:
 # ============================================================================
 
 class LocalStorage:
-    """Saves data locally as backup"""
-    
     def __init__(self):
         self.data_dir = os.path.join(PROJECT_ROOT, 'data')
         os.makedirs(self.data_dir, exist_ok=True)
     
     def save(self, raw_data: Dict, processed_row: List[List[Any]]):
-        """Save data to local files"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # Clean raw_data for JSON serialization
         clean_raw_data = DataCleaner.fix_nan_values(raw_data)
         
-        # Save raw data as JSON
         raw_file = os.path.join(self.data_dir, f'raw_{timestamp}.json')
         with open(raw_file, 'w') as f:
             json.dump(clean_raw_data, f, indent=2, default=str)
         print(f"💾 Raw data saved: {raw_file}")
         
-        # Save processed data as CSV
         csv_file = os.path.join(self.data_dir, f'data_{timestamp}.csv')
         with open(csv_file, 'w') as f:
-            # Write headers
-            f.write(','.join(DataProcessor.COLUMNS) + '\n')
-            # Write data
+            f.write(','.join(DataProcessor.COLUMNS) + '\\n')
             clean_row = []
             for cell in processed_row[0]:
                 if isinstance(cell, float) and math.isnan(cell):
                     clean_row.append('')
                 else:
                     clean_row.append(str(cell) if cell is not None else '')
-            f.write(','.join(clean_row) + '\n')
+            f.write(','.join(clean_row) + '\\n')
         print(f"💾 CSV data saved: {csv_file}")
 
 # ============================================================================
@@ -504,60 +378,33 @@ class LocalStorage:
 # ============================================================================
 
 def main():
-    """Main execution function"""
-    print("\n" + "="*60)
+    print("\\n" + "="*60)
     print("🚀 FINANCE BLADI AUTOMATION")
     print("="*60)
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    # Debug information
-    print(f"\n📍 Current directory: {os.getcwd()}")
-    print(f"📍 Project root: {PROJECT_ROOT}")
+    print(f"\\n📍 Project root: {PROJECT_ROOT}")
     
-    # Look for credentials in environment variable first
+    # Credentials logic
     creds_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
-    if creds_path:
-        print(f"🔑 Using credentials path from env: {creds_path}")
-    else:
-        # Try to find credentials
+    if not creds_path:
         possible_paths = [
             'credentials.json',
-            os.path.join(os.getcwd(), 'credentials.json'),
             os.path.join(PROJECT_ROOT, 'credentials.json'),
             '/home/runner/work/finance-bladi-automation/finance-bladi-automation/credentials.json'
         ]
-        
-        print("🔍 Looking for credentials file...")
         for path in possible_paths:
-            exists = os.path.exists(path)
-            print(f"   {path}: {'✅ Found' if exists else '❌ Missing'}")
-            if exists and not creds_path:
+            if os.path.exists(path):
                 creds_path = path
-        
-        if not creds_path:
-            print("❌ No credentials.json found!")
-            return False
+                break
     
-    # Verify credentials file exists and is valid
-    if not os.path.exists(creds_path):
-        print(f"❌ Credentials file not found: {creds_path}")
+    if not creds_path or not os.path.exists(creds_path):
+        print("❌ No credentials.json found!")
+        # If running on GitHub Actions without credentials, we might want to exit gracefully
         return False
     
-    # Check if credentials file is valid JSON
-    try:
-        with open(creds_path, 'r') as f:
-            content = f.read()
-            if not content.strip():
-                print("❌ Credentials file is empty!")
-                return False
-            
-            import json
-            creds_data = json.loads(content)
-            print(f"✅ Credentials valid. Service account: {creds_data.get('client_email', 'Unknown')}")
-    except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON in credentials: {e}")
-        return False
-    
+    print(f"✅ Using credentials: {creds_path}")
+
     # Initialize components
     collector = ModuleCollector()
     processor = DataProcessor()
@@ -565,114 +412,39 @@ def main():
     local_storage = LocalStorage()
     
     try:
-        # 1. Collect data from all modules
-        print("\n📦 Collecting data from modules...")
+        # 1. Collect data
+        print("\\n📦 Collecting data from modules...")
         raw_data = collector.collect_all()
         
         if not raw_data:
-            print("❌ No data collected. Exiting.")
-            return False
-        
-        print(f"✅ Collected data from {len(raw_data)} modules")
-        
-        # 2. Clean the raw data
+            print("❌ No data collected.")
+            # Don't exit here, maybe we have partial data or want to retry
+            
+        # 2. Clean & Process
         raw_data = DataCleaner.clean_data_for_export(raw_data)
-        
-        # 3. Process data into unified format
-        print("\n🔄 Processing data into unified format...")
+        print("\\n🔄 Processing data into unified format...")
         processed_data = processor.process(raw_data)
         
-        # Show what we collected
-        print("\n📊 KEY DATA COLLECTED:")
-        key_data = {
-            'EUR/MAD': None,
-            'USD/MAD': None,
-            'BT2Y': None,
-            'MASI': None,
-            'Phosphate DAP': None,
-            'BITCOIN': None
-        }
-        
-        # Extract key values
-        forex_data = raw_data.get('bkam_forex', {})
-        if isinstance(forex_data, dict):
-            key_data['EUR/MAD'] = forex_data.get('EUR/MAD')
-            key_data['USD/MAD'] = forex_data.get('USD/MAD')
-        
-        treasury_data = raw_data.get('bkam_treasury', {})
-        if isinstance(treasury_data, dict):
-            key_data['BT2Y'] = treasury_data.get('BT2Y')
-        
-        masi_data = raw_data.get('investing_masi', {})
-        if isinstance(masi_data, dict):
-            key_data['MASI'] = masi_data.get('MASI')
-        
-        phosphate_data = raw_data.get('trading_economics', {})
-        if isinstance(phosphate_data, dict):
-            key_data['Phosphate DAP'] = phosphate_data.get('Phosphate DAP')
-        
-        yahoo_data = raw_data.get('yahoo_markets', {})
-        if isinstance(yahoo_data, dict):
-            key_data['BITCOIN'] = yahoo_data.get('BITCOIN')
-        
-        for key, value in key_data.items():
-            if value is not None and value != '':
-                print(f"  • {key}: {value}")
-        
-        # 4. Export to Google Sheets
-        print("\n" + "="*60)
+        # 3. Export
+        print("\\n" + "="*60)
         export_success = sheets_exporter.export(processed_data)
         
-        if export_success:
-            print("\n✅ Data organized in Google Sheets:")
-            print(f"   • Sheet: '{sheets_exporter.sheet_name}'")
-            print(f"   • Columns: {len(sheets_exporter.headers)}")
-            print(f"   • URL: https://docs.google.com/spreadsheets/d/{sheets_exporter.spreadsheet_id}")
-            print(f"   • Today's data: {datetime.now().strftime('%Y-%m-%d')}")
-        else:
-            print("\n❌ Google Sheets export failed")
+        if not export_success:
+            print("❌ Google Sheets export failed")
         
-        # 5. Save local backup
-        print("\n💾 Saving local backup...")
+        # 4. Save local
+        print("\\n💾 Saving local backup...")
         local_storage.save(raw_data, processed_data)
-        
-        # 6. Summary
-        print("\n" + "="*60)
-        print("🎯 EXECUTION SUMMARY")
-        print("="*60)
-        print(f"Modules: {len(raw_data)}/{len(collector.MODULES)} successful")
-        print(f"Errors: {len(collector.errors)}")
-        
-        if collector.errors:
-            print("\n⚠️ Errors encountered:")
-            for error in collector.errors[:3]:
-                print(f"  • {error}")
-        
-        print(f"\n📁 Local data: {local_storage.data_dir}/")
-        print(f"📋 Logs: {os.path.join(PROJECT_ROOT, 'logs')}/")
         
         return export_success
         
-    except KeyboardInterrupt:
-        print("\n⚠️ Process interrupted by user")
-        return False
     except Exception as e:
-        print(f"\n❌ Critical error: {e}")
-        logger.error(f"Critical error: {e}")
+        print(f"\\n❌ Critical error: {e}")
         traceback.print_exc()
         return False
 
-# ============================================================================
-# ENTRY POINT
-# ============================================================================
-
 if __name__ == "__main__":
-    # Save this as main.py in your project root
     success = main()
-    
-    if success:
-        print("\n✅ FINANCE BLADI AUTOMATION COMPLETED SUCCESSFULLY")
-    else:
-        print("\n❌ FINANCE BLADI AUTOMATION FAILED")
-    
     sys.exit(0 if success else 1)
+"""
+}
