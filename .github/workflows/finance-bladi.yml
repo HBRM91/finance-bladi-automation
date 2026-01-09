@@ -40,7 +40,7 @@ jobs:
     - name: 🚀 Run Finance Bladi Automation
       run: |
         echo "🕐 Starting automation at $(date)"
-        python src/main.py
+        python main.py
         echo "✅ Automation completed at $(date)"
         
     - name: 💾 Upload artifacts
