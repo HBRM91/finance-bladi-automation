@@ -13,3 +13,4 @@ lxml
 gspread
 google-auth
 lxml
+cloudscraper
