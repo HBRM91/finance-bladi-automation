@@ -34,6 +34,7 @@ jobs:
         pip install yfinance pandas requests gspread oauth2client
         
     - name: 🔑 Setup Google Sheets credentials
+<<<<<<< HEAD
       run: |
         echo "=== DEBUG: Checking secret ==="
         echo "Secret name: GOOGLE_CREDENTIALS"
@@ -80,6 +81,15 @@ except Exception as e:
         echo "SPREADSHEET_ID: $SPREADSHEET_ID"
         echo "Credentials file: $(ls -la credentials.json)"
         python main.py
+=======
+      run: |
+        echo '${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}' > credentials.json
+        
+    - name: 🚀 Run Finance Bladi Automation
+      run: |
+        echo "🕐 Starting automation at $(date)"
+        python src/main.py
+>>>>>>> 36ce851 (Add GitHub Actions workflow)
         echo "✅ Automation completed at $(date)"
         
     - name: 💾 Upload artifacts
@@ -90,4 +100,8 @@ except Exception as e:
         path: |
           data/
           logs/
+<<<<<<< HEAD
         retention-days: 7
+=======
+        retention-days: 7
+>>>>>>> 36ce851 (Add GitHub Actions workflow)
