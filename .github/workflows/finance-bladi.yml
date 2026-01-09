@@ -35,11 +35,50 @@ jobs:
         
     - name: 🔑 Setup Google Sheets credentials
       run: |
-        echo '${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}' > credentials.json
+        echo "=== DEBUG: Checking secret ==="
+        echo "Secret name: GOOGLE_CREDENTIALS"
+        echo "Secret length: ${#GOOGLE_CREDENTIALS} characters"
+        
+        # Write the secret to file
+        echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
+        
+        # Validate the JSON
+        echo "=== Validating credentials.json ==="
+        if python -c "import json, sys; json.load(open('credentials.json')); print('✅ JSON is valid')"; then
+          echo "✅ Credentials file created successfully"
+          echo "File size: $(wc -c < credentials.json) bytes"
+          echo "First line: $(head -1 credentials.json | cut -c1-50)..."
+        else
+          echo "❌ ERROR: Invalid JSON in credentials"
+          echo "File content preview:"
+          head -5 credentials.json
+          exit 1
+        fi
+        
+    - name: 🧪 Test credentials (quick check)
+      run: |
+        echo "=== Testing credentials ==="
+        python -c "
+import json, os
+try:
+    with open('credentials.json', 'r') as f:
+        data = json.load(f)
+    print(f'✅ Valid JSON. Service account: {data.get(\"client_email\", \"NOT FOUND\")}')
+    print(f'✅ Project ID: {data.get(\"project_id\", \"NOT FOUND\")}')
+    print(f'✅ Private key present: {\"YES\" if data.get(\"private_key\") else \"NO\"}')
+except Exception as e:
+    print(f'❌ Error: {e}')
+    exit(1)
+"
         
     - name: 🚀 Run Finance Bladi Automation
+      env:
+        SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       run: |
         echo "🕐 Starting automation at $(date)"
+        echo "Environment variables:"
+        echo "SPREADSHEET_ID: $SPREADSHEET_ID"
+        echo "Credentials file: $(ls -la credentials.json)"
         python main.py
         echo "✅ Automation completed at $(date)"
         
